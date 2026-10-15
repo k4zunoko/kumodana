@@ -1,50 +1,144 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# kumodana（雲棚）Constitution
+
+kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」である。画像と HTML を置き、
+リンクで人に見せる・渡す。利用者は所有者 1 人、閲覧者はリンクを受け取った人に限る。
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. 原本は手元、棚には共有用のコピーだけ
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+- kumodana は共有のための棚であり、保管庫ではない。バックアップや世代管理を
+  kumodana の責務にしない（MUST NOT）。
+- CLI は手元の原本を変更・移動・削除しない（MUST NOT）。EXIF の削除などの加工は、
+  一時コピーに対して行う（MUST）。
+- 棚からの削除は、R2 のオブジェクトと D1 の記録を消すことを意味する。原本には影響しない。
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+理由: 目的を「人に見せる・渡す」に絞ることで、耐久性やバックアップの要件を持ち込まずに済む。
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. 既定は非公開、共有はリンクで行う
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+- 公開範囲はファイルではなくリンクの属性とする。リンクを持たないファイルは、
+  所有者だけが見られる（MUST）。
+- リンクのトークンは暗号論的乱数で 128 ビット以上とし、推測できないようにする（MUST）。
+- リンクは取り消すまで有効で、1 つのファイルに複数発行できる（MUST）。
+- 取り消しは、D1 での無効化とエッジキャッシュの削除までを 1 つの操作で行う（MUST）。
+  キャッシュの削除に失敗した場合は、そのことを利用者に明示する（MUST）。
+  ブラウザに残るキャッシュの期間は短く保つ（SHOULD）。
+- 一覧への公開掲載（public）、期限付きリンク、閲覧者がファイルを列挙できる経路は
+  作らない（MUST NOT）。追加するには憲法の改正が必要である。
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+理由: 共有の単位をリンクにすると、渡した相手ごとに取り消せる。
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. 書き込み経路は管理 API だけ
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+- R2 と D1 への書き込みは、すべて管理 API（管理用 Worker）を通す（MUST）。
+  `cf r2` や `wrangler r2` などによる直接の書き込みは、緊急時の手順書に定めた場合を除き
+  行わない（MUST NOT）。
+- メタデータは D1 を正とする。`ready` 状態のファイルには、対応する R2 オブジェクトが
+  必ず存在する状態を保つ（MUST）。途中で失敗した処理の残骸は、自動で片付ける（MUST）。
+- 配信用 Worker は、読み取りと自身のキャッシュの削除だけを行い、書き込みの処理を
+  持たない（MUST NOT）。
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+理由: 経路を 1 本にすると、容量計算・リンク・タグの整合性を 1 か所で保証できる。
+
+### IV. 多層防御
+
+- 管理 API は Cloudflare Access で保護し、許可するのは所有者のメールアドレスと
+  CLI 用のサービストークンだけにする（MUST）。さらに Worker 自身が Access の JWT
+  （署名と aud）を検証し、Access の設定だけに依存しない（MUST）。
+- 管理用と配信用は、別の Worker・別のオリジンにする（MUST）。プレビュー URL は
+  無効にする（MUST）。
+- 配信する HTML と SVG には、`allow-same-origin` を含まない CSP の `sandbox` を
+  既定で付ける（MUST）。
+- 配信するすべてのファイルに `X-Content-Type-Options: nosniff`、
+  `Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex` を付ける（MUST）。
+- 管理用と配信用は同一サイト（`meshnode.workers.dev`）にあり、SameSite Cookie では
+  守れない。このため管理 API は、他のオリジンのブラウザから来たリクエストと、
+  独自ヘッダーのないリクエストを拒否する（MUST）。
+- 画像の EXIF（位置情報を含む）は、アップロード前に既定で削除する（MUST）。
+  残すのは、利用者が明示的に指定した場合だけとする。表示に必要な向きの情報と
+  カラープロファイルは残す（MUST）。
+- サービストークンや API トークンなどの秘密情報を、リポジトリに含めない（MUST NOT）。
+
+理由: 利用者が 1 人でも、アップロードした HTML や広まったリンクを起点にした攻撃は起こりうる。
+
+### V. コストには上限を設ける
+
+- Workers は無料プランで運用する（MUST）。有料プランへの変更は、憲法の改正で決める。
+- R2 の保存量には、アプリ側で上限（8 × 10⁹ バイト）を設ける（MUST）。判定は、
+  処理中のアップロードを含めた合計に対して、D1 上で原子的に行う（MUST）。
+  上限を超えるアップロードは、使用量・上限・要求サイズが分かるエラーで拒否する（MUST）。
+- 配信はキャッシュ（Workers Cache）を通す（MUST）。クエリ文字列など、キャッシュを
+  素通りさせる要求は拒否する（MUST）。
+- 重い処理（EXIF の削除、ハッシュの計算、ファイル形式の判定）は CLI 側で行い、
+  Worker の CPU 時間の上限（無料プランでは 1 回 10ms）に収める（MUST）。
+- Cloudflare の予算アラートを設定する（MUST）。Workers を使わずに配信を止める
+  緊急停止の手順を用意する（MUST）。
+
+理由: R2 は無料枠を超えると自動で課金される。Workers の無料枠を使い切ると、管理 API も
+止まる。どちらも、アプリと手順の側で備える必要がある。
+
+### VI. 重要な経路は自動テストで守る
+
+- 認証と認可、容量の上限、リンクの解決と取り消し、配信時のセキュリティヘッダーと
+  キャッシュヘッダーには、自動テストを用意する（MUST）。
+- Worker のテストは、Workers ランタイム（workerd）上で、ローカルの D1 と R2 を使って
+  実行する（MUST）。
+- 型検査とテストが通らない状態ではデプロイしない（MUST NOT）。
+
+理由: これらの不具合は情報漏えいや課金に直結し、手作業の確認では見落としやすい。
+
+### VII. 小さく保つ
+
+- 対象は画像と 1 枚で完結する HTML、操作は CLI だけとする。動画、zip で上げるサイト、
+  アルバムのギャラリーページ、Web UI は、それぞれ仕様（spec）を作ってから追加する（MUST）。
+- フォルダ（階層）は作らない。整理はタグとアルバムで行う（MUST）。
+- 依存ライブラリや外部サービスを追加するときは、プラットフォームの機能や標準 API では
+  足りない理由を plan に記録する（MUST）。
+- ベータ版のツール（`cf` など）は、版を完全に固定する（MUST）。
+
+理由: 1 人で保守できる大きさを保つ。
+
+## 技術・運用上の制約
+
+- プラットフォームは Cloudflare（Workers、R2、D1、Access、Workers Cache）とする。
+  他のクラウドを使う場合は、憲法の改正が必要である。
+- 独自ドメインを持つまでは `meshnode.workers.dev` で公開する。管理用 Worker は
+  `kumodana-admin`、配信用 Worker は `kumo` とする。配信 URL の基点は設定値にし、
+  ドメインの移行をコードの変更なしで行えるようにする。
+- Worker の設定は `cloudflare.config.ts` に書き、デプロイとリソースの操作は `cf` で行う。
+  `cf` でできない操作（ライブログなど）に限り、`npx wrangler` を使う。
+- 実行環境は Node.js 22.18 以上と TypeScript とする。npm パッケージは、公開から
+  7 日以上経った版を使う（npm の `min-release-age` 設定に従う）。
+- 受け付けるファイルは JPEG、PNG、GIF、WebP、AVIF、SVG、HTML で、1 ファイル 100MB 未満とする。
+- Cloudflare 側の設定（Access、予算アラート、緊急停止）は、手順書またはスクリプトとして
+  リポジトリに残す。
+- 基準とする技術選定は次のとおり。plan で変更してよいが、変更の理由を plan に記録する。
+  - 管理用 Worker: Hono、Zod、jose
+  - 配信用 Worker: フレームワークなし
+  - D1: 素の SQL と手書きのマイグレーション
+  - CLI: Node.js、commander、exiftool-vendored
+  - テスト: Vitest、`@cloudflare/vitest-plugin`
+
+## 開発ワークフロー
+
+- Spec Kit の流れで進める: `/speckit.specify` → 必要に応じて `/speckit.clarify` →
+  `/speckit.plan` → `/speckit.tasks` → `/speckit.implement`。
+- 仕様・計画・タスクなどの文書は日本語で書く。
+- 各 plan は「Constitution Check」でこの憲法への適合を確認する。違反がある場合は、
+  その理由と、より単純な代替案を採らなかった理由を Complexity Tracking に記録する。
+- デプロイの前に、型検査、テスト、`cf deploy --dry-run` を通す。
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+- この憲法は、プロジェクトの他の慣行や文書より優先する。
+- 改正は `/speckit.constitution` で行い、変更点・理由・影響を Sync Impact Report に記す。
+- バージョンはセマンティックバージョニングに従う。
+  - MAJOR: 原則の削除や再定義など、後方互換のない変更
+  - MINOR: 原則や節の追加、指針の大幅な拡張
+  - PATCH: 表現の明確化や誤字の修正など、意味を変えない変更
+- 適合の確認は、`/speckit.plan` の Constitution Check（設計の前と後）、
+  `/speckit.analyze` の実行時、デプロイの前に行う。
+- 恒常的に必要な例外は、例外として扱い続けずに憲法を改正する。
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-15
