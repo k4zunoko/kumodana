@@ -22,6 +22,8 @@
 **Language/Version**: TypeScript 7.0（型検査）、Node.js 22.18 以上（CLI と開発ツール）、Workers ランタイム
 （compatibility date は実装開始時の `cf init` の値に固定）
 
+**Build**: Worker は `cf build`（Vite）でバンドルする。CLI はビルドせず、Node.js の型除去で直接実行する（research R16）
+
 **Primary Dependencies**:
 - 管理用 Worker: Hono 4、Zod 4、jose 6
 - 配信用 Worker: なし（`WorkerEntrypoint` のみ）

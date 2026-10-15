@@ -162,3 +162,15 @@
 - **Rationale**: どちらも Cloudflare の API・ダッシュボードで完結し、Workers の 1 日の上限に達していても実行できる。
   `cf cli search` では workers.dev を単独で切り替えるコマンドが見つからず、予算アラートの API も見つからなかった。
 - **実装時の確認事項**: `cf workers triggers deploy --mode stopped` で workers.dev の公開が止まることを確認する。
+
+## R16. CLI の実行方法
+
+- **Decision**: CLI はビルドせず、Node.js 22.18 以上の型除去（type stripping）で TypeScript を直接実行する。
+  `apps/cli/bin/kumo.js` から `../src/main.ts` を読み込み、`npm install -g ./apps/cli` でコマンドを登録する。
+  型除去で扱えない構文（`enum`、`namespace`、コンストラクター引数のプロパティなど）は使わず、
+  `tsconfig` で `erasableSyntaxOnly` を有効にする。
+- **Rationale**: 自分の PC だけで使うため配布用のビルドは不要で、依存とビルド手順を減らせる（憲法 VII）。
+- **Alternatives considered**: tsdown などでのバンドル（ビルド手順が増える）。
+- **実装時の確認事項**: Node.js は `node_modules` 配下の `.ts` を型除去しない。グローバル登録したコマンドと、
+  ワークスペースの `@kumodana/shared` の読み込みが、実体のパス（`node_modules` の外）で解決されて動くことを
+  Windows で確認する。
