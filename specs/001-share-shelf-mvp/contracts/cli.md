@@ -1,0 +1,81 @@
+# Contract: `kumo` CLI
+
+所有者が使うコマンドラインツール。管理 API（[admin-api.md](./admin-api.md)）だけを呼ぶ。
+
+## 設定
+
+優先順位は「環境変数 → 設定ファイル」。
+
+| 環境変数 | 設定ファイルのキー | 内容 |
+|---|---|---|
+| `KUMODANA_ADMIN_URL` | `adminUrl` | 管理 API の URL |
+| `KUMODANA_CLIENT_ID` | `clientId` | サービストークンのクライアント ID |
+| `KUMODANA_CLIENT_SECRET` | `clientSecret` | サービストークンのシークレット |
+
+- 設定ファイル: Windows では `%APPDATA%\kumodana\config.json`、それ以外では
+  `$XDG_CONFIG_HOME/kumodana/config.json`（未設定なら `~/.config/kumodana/config.json`）。
+- シークレットは、どの出力（`--json` を含む）やエラーメッセージにも表示しない。
+- 社内プロキシは Node.js の `NODE_USE_ENV_PROXY=1` と `HTTPS_PROXY` に従う。
+
+## 共通オプションと終了コード
+
+- `--json`: 結果を JSON で標準出力に書く。人向けの表示は標準出力、警告とエラーは標準エラー出力に書く。
+- 終了コード: `0` 成功、`1` 操作の失敗（API のエラー、通信の失敗、一部の失敗を含む）、`2` 使い方の誤り
+  （引数の不足、ローカルでの検証失敗）。
+- エラーは「何が起きたか」と「どうすればよいか」を 1〜2 行で表示する。API のエラーコードも表示する。
+
+## コマンド
+
+### `kumo put <path...> [--tag <tag>]... [--album <name>] [--link] [--label <text>] [--keep-exif]`
+
+各ファイルについて次を行う。
+
+1. サイズを確認（100MB 以上は送信前に拒否）
+2. 中身で形式を判定（対象外・HEIC は理由とともに拒否）
+3. 画像で `--keep-exif` がなければ、一時コピーの EXIF を削除（向きとカラープロファイルは残す）
+4. SHA-256 を計算し、同じ内容がないか確認（`GET /api/files?sha256=`）
+5. なければ `PUT /api/files`、あれば既存のファイルを使う
+6. `--tag` があれば付与、`--album` があれば追加（アルバムがなければ作成）、`--link` があればリンクを発行
+
+- 出力（人向け）: `<id>  <name>  <size>  [重複: 既存のファイルを使用]` と、リンクを発行した場合はその URL。
+- 複数ファイルのうち一部が失敗しても残りは続行し、最後に失敗の一覧を表示して終了コード `1` で終わる。
+- 原本は読み取るだけで、変更しない。一時コピーは終了時に削除する。
+
+### `kumo ls [--tag <tag>] [--album <name>] [--limit <n>]`
+
+- 新しい順に ID、名前、形式、サイズ、日時、タグ、有効なリンク数を表示する。続きがあれば自動で取得する
+  （`--limit` で件数の上限を指定）。
+
+### `kumo get <id> [--output <path>]`
+
+- 内容を元のファイル名（または `--output`）で保存する。同名のファイルがあれば上書きせずエラーにする。
+
+### `kumo rm <id...>`
+
+- 1 件ずつ削除する。キャッシュの削除に失敗した場合は、そのファイルで止め、やり直しの方法を表示する。
+
+### `kumo tag <id> <+tag|-tag>...`
+
+- 例: `kumo tag 3k9x2m4q7a +旅行 +2026 -draft`。結果のタグ一覧を表示する。
+
+### `kumo album ls` / `kumo album create <name>` / `kumo album rm <name>`
+### `kumo album add <name> <id...>` / `kumo album remove <name> <id>`
+
+- アルバムは名前で指定する（大文字・小文字は区別しない）。CLI が名前から ID を引く。
+
+### `kumo link create <id> [--label <text>]`
+
+- 発行したリンクの URL を表示する。
+
+### `kumo link ls [<id>] [--all]`
+
+- 有効なリンクを新しい順に表示する。`--all` で取り消し済みも含める。表示項目: URL、ファイル ID、メモ、作成日時、状態。
+
+### `kumo link revoke <token|url>`
+
+- URL を渡した場合はトークンを取り出す。キャッシュの削除に失敗した場合は、取り消しは完了したことと、
+  同じコマンドで削除をやり直せることを表示し、終了コード `1` で終わる。
+
+### `kumo usage`
+
+- 使用量、上限、残り、ファイル数を表示する。
