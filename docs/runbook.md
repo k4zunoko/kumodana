@@ -129,6 +129,18 @@ npm install -g ./apps/cli    # kumo コマンドを登録（ビルド不要。No
 
 `kumo usage` が使用量を表示すれば設定は完了。
 
+### シークレットの保管と再発行
+
+`clientSecret` は発行時に一度しか表示されず、このファイルにしか保存していない（控えは取らない方針）。
+ファイルを失ったとき、漏れたとき、期限（2027-10-16）が近いときは、同じトークンのシークレットを再発行する。
+
+```sh
+npx cf zero-trust access service-tokens rotate <service_token_id>   # kumodana-cli の ID は cf zero-trust access service-tokens list で確認
+```
+
+`clientId` は変わらないため、Worker の再デプロイは不要。新しいシークレットで `config.json` の `clientSecret` を
+書き換え、`kumo usage` で確認する。古いシークレットは使えなくなる。
+
 ## 8. 予算アラートと使用量の通知（憲法 V、FR-038）
 
 - ダッシュボードの Manage Account → Billing → Billable Usage → **Budget alerts** でアラートを作る
