@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "cf dev",
-    "build": "cf build",
+    "dev": "vite dev",
+    "build": "vite build",
     "typecheck": "cf workers types && tsc -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy": "npm run typecheck && npm test && vite build && cf deploy --prebuilt --mode production --dry-run && cf deploy --prebuilt --mode production --secrets-file ../../.secrets.production.json"
   },
   "dependencies": {
     "@kumodana/shared": "0.0.0",

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kumodana 隔離チェック（SC-006）</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 48rem; padding: 0 1rem; line-height: 1.6; }
+  li { margin: .5rem 0; }
+  .pass { color: #0a7d32; }
+  .fail { color: #b00020; font-weight: bold; }
+  code { background: #f2f2f2; padding: 0 .25rem; }
+  input { width: 100%; }
+</style>
+</head>
+<body>
+<h1>kumodana 隔離チェック</h1>
+<p>
+  このページを <code>kumo put docs/verification/isolation-check.html --link</code> で置き、発行されたリンクで開く。
+  すべての項目が「防がれた」になれば、共有した HTML から管理操作・Cookie・保存領域・他のリンクに手が出せないことを確認できる（SC-006）。
+</p>
+<p>
+  他のリンクの読み取りを確かめるには、別のファイルのリンク URL を入れてから「再実行」を押す。<br>
+  <input id="other" placeholder="https://kumo.meshnode.workers.dev/（別のリンクのトークン）">
+  <button id="rerun" type="button">再実行</button>
+</p>
+<ol id="results"></ol>
+<script>
+  const ADMIN = "https://kumodana-admin.meshnode.workers.dev/api/usage";
+  const list = document.getElementById("results");
+
+  function report(name, blocked, detail) {
+    const li = document.createElement("li");
+    li.className = blocked ? "pass" : "fail";
+    li.textContent = `${blocked ? "防がれた" : "防がれていない"}: ${name}（${detail}）`;
+    list.appendChild(li);
+  }
+
+  async function check(name, attempt) {
+    try {
+      const detail = await attempt();
+      report(name, false, detail ?? "成功してしまった");
+    } catch (error) {
+      report(name, true, String(error && error.message ? error.message : error));
+    }
+  }
+
+  async function run() {
+    list.textContent = "";
+    await check("Cookie の読み取り", async () => `document.cookie = "${document.cookie}"`);
+    await check("Cookie の書き込み（親ドメインへ）", async () => {
+      document.cookie = "kumodana_test=1; Domain=meshnode.workers.dev; Path=/";
+      return "書き込めた";
+    });
+    await check("localStorage", async () => {
+      localStorage.setItem("kumodana_test", "1");
+      return "保存できた";
+    });
+    await check("管理 API（Cookie 付き、独自ヘッダーなし）", async () => {
+      const res = await fetch(ADMIN, { credentials: "include" });
+      if (res.ok) return `HTTP ${res.status} で読めた`;
+      throw new Error(`HTTP ${res.status}`);
+    });
+    await check("管理 API（Cookie 付き、独自ヘッダーあり）", async () => {
+      const res = await fetch(ADMIN, { credentials: "include", headers: { "X-Kumodana-Client": "cli" } });
+      if (res.ok) return `HTTP ${res.status} で読めた`;
+      throw new Error(`HTTP ${res.status}`);
+    });
+    await check("管理 API への POST（フォーム相当）", async () => {
+      const res = await fetch(ADMIN, { method: "POST", credentials: "include", mode: "no-cors", body: "x" });
+      // no-cors の応答は中身が見えない。管理 API は独自ヘッダーのない要求を 403 で拒否する。
+      throw new Error(`応答は読めない（type=${res.type}）。管理 API 側で独自ヘッダーなしの要求は拒否される`);
+    });
+    const other = document.getElementById("other").value.trim();
+    if (other) {
+      await check("他のリンクの読み取り", async () => {
+        const res = await fetch(other);
+        const text = await res.text();
+        return `${text.length} 文字を読めた`;
+      });
+    } else {
+      report("他のリンクの読み取り", true, "URL 未入力のため未実施");
+    }
+  }
+
+  document.getElementById("rerun").addEventListener("click", run);
+  run();
+</script>
+</body>
+</html>

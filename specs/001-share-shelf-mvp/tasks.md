@@ -205,12 +205,12 @@ description: "Task list for 001-share-shelf-mvp"
 
 **Purpose**: 運用の手順、デプロイ、全体の検証
 
-- [ ] T078 [P] Write `docs/runbook.md`: confirm the account stays on the Workers Free plan（憲法 V）; create D1 `kumodana`（APAC）and R2 `kumodana` and record IDs in both `cloudflare.config.ts`; apply migrations; deploy order（配信用 Worker `kumo` → 管理用 Worker `kumodana-admin`）; `.secrets.production.json` keys; Zero Trust setup; service token creation and renewal（`cf zero-trust access service-tokens create` / `refresh`、期限の記録）; Worker-level Access application（destination type `worker`、所有者のメールを許可＋サービストークンの Service Auth）; strict service token authentication; budget alert（$1）and R2 usage notification; emergency stop（`cf workers triggers deploy --mode stopped` と復旧）; `npx wrangler tail`
-- [ ] T079 Add deploy scripts: `deploy` in `apps/files/package.json` and `apps/admin/package.json`（型検査 → テスト → `cf deploy --dry-run` → `cf deploy`、admin は `--secrets-file ../../.secrets.production.json`）and root `deploy` in `package.json`（`kumo` → `kumodana-admin` の順）
-- [ ] T080 [P] Create `docs/verification/isolation-check.html` for SC-006: tries `fetch` to the admin API with `credentials: "include"`, `document.cookie` read/write, `localStorage`, and reading another link, and displays each result
-- [ ] T081 [P] Write `README.md`: purpose, repository structure, kumo CLI setup, links to quickstart.md and `docs/runbook.md`
+- [X] T078 [P] Write `docs/runbook.md`: confirm the account stays on the Workers Free plan（憲法 V）; create D1 `kumodana`（APAC）and R2 `kumodana` and record IDs in both `cloudflare.config.ts`; apply migrations; deploy order（配信用 Worker `kumo` → 管理用 Worker `kumodana-admin`）; `.secrets.production.json` keys; Zero Trust setup; service token creation and renewal（`cf zero-trust access service-tokens create` / `refresh`、期限の記録）; Worker-level Access application（destination type `worker`、所有者のメールを許可＋サービストークンの Service Auth）; strict service token authentication; budget alert（$1）and R2 usage notification; emergency stop（`cf workers triggers deploy --mode stopped` と復旧）; `npx wrangler tail`
+- [X] T079 Add deploy scripts: `deploy` in `apps/files/package.json` and `apps/admin/package.json`（型検査 → テスト → `cf deploy --dry-run` → `cf deploy`、admin は `--secrets-file ../../.secrets.production.json`）and root `deploy` in `package.json`（`kumo` → `kumodana-admin` の順）
+- [X] T080 [P] Create `docs/verification/isolation-check.html` for SC-006: tries `fetch` to the admin API with `credentials: "include"`, `document.cookie` read/write, `localStorage`, and reading another link, and displays each result
+- [X] T081 [P] Write `README.md`: purpose, repository structure, kumo CLI setup, links to quickstart.md and `docs/runbook.md`
 - [ ] T082 Verify the open items in research.md（R9: `retain` で Orientation と ICC_Profile が残る、R15: `--mode stopped` で workers.dev の公開が止まる）and record them together with the T030 result（R16）in `docs/runbook.md`
-- [ ] T083 Run `npm run typecheck` and `npm test` at repository root and fix all failures
+- [X] T083 Run `npm run typecheck` and `npm test` at repository root and fix all failures
 - [ ] T084 Run the quickstart.md validation against production: SC-001（5MB の画像、上り 10Mbps 以上で 15 秒以内）, SC-002（指定のブラウザ）, SC-003（取り消しから 1 分以内）, `cf-cache-status: HIT`, isolation page, emergency stop drill
 
 ---

@@ -11,6 +11,7 @@
   },
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "deploy": "npm run deploy -w @kumodana/files && npm run deploy -w @kumodana/admin"
   }
 }
