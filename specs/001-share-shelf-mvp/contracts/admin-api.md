@@ -104,9 +104,10 @@ type TagCount = { tag: string; fileCount: number };
 ### `DELETE /api/files/{id}`
 
 - 処理は data-model.md の「削除の手順」に従う。`deleting` のファイルに対しては、やり直しとして手順 2 から続ける
-- 200: `{ "deleted": "<id>", "revokedLinks": number, "purge": PurgeResult | null, "completed": boolean }`
+- 200: `{ "deleted": "<id>", "revokedLinks": number, "purge": PurgeResult | null }`
+  - 削除は常に完了する（R2 のオブジェクトと行を削除済み）
   - `purge` はキャッシュの削除が不要（リンクを発行したことがない）なら `null`
-  - `completed: false` は、キャッシュの削除に失敗して `deleting` のまま残ったことを示す（60 分以内に自動で完了）
+  - `purge.ok = false` は、配信側のキャッシュに最長 1 時間残る可能性があることを示す
 - 404 `not_found`
 
 ### `PATCH /api/files/{id}/tags`
@@ -142,7 +143,8 @@ type TagCount = { tag: string; fileCount: number };
 
 - 15 分ごとに実行する。
   - `pending` のまま `updated_at` から 30 分を超えたファイル: R2 のオブジェクト（あれば）と行を削除する
-  - `deleting` のまま `updated_at` から 60 分を超えたファイル: R2 のオブジェクト（あれば）と行を削除する
+  - `deleting` のまま `updated_at` から 15 分を超えたファイル（途中で止まった削除）: R2 のオブジェクト（あれば）と
+    行を削除する
 - どちらも、途中で失敗したものは次回に再び処理する。
 
 ## エラーコード一覧
