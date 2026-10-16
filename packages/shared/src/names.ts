@@ -9,7 +9,6 @@ export function normalizeTag(input: string): TagResult {
 	if ([...tag].length > MAX_TAG_LENGTH) {
 		return { ok: false, reason: `タグは ${MAX_TAG_LENGTH} 文字以内にしてください。` };
 	}
-	// biome-ignore lint: control characters are intentionally matched
 	if (/[\u0000-\u001f\u007f]/.test(tag)) return { ok: false, reason: "タグに制御文字は使えません。" };
 	if (tag.includes(",")) return { ok: false, reason: "タグにカンマは使えません。" };
 	return { ok: true, tag };

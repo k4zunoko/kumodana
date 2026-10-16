@@ -27,11 +27,4 @@ export function applyCacheHeaders(headers: Headers, token: string, fileId: strin
 	headers.set("Cache-Tag", `l:${token},f:${fileId}`);
 }
 
-/** RFC 5987 `filename*` value for Content-Disposition. */
-export function contentDisposition(kind: "inline" | "attachment", name: string): string {
-	const encoded = encodeURIComponent(name).replace(
-		/['()*]/g,
-		(c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-	);
-	return `${kind}; filename*=UTF-8''${encoded}`;
-}
+export { contentDisposition } from "@kumodana/shared/http";
