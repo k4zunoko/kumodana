@@ -1,0 +1,11 @@
+node_modules/
+.cloudflare/
+.wrangler/
+.env
+.env.*
+.dev.vars*
+.secrets.*.json
+coverage/
+*.log
+.DS_Store
+Thumbs.db

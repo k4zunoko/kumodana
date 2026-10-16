@@ -1,0 +1,26 @@
+{
+  "name": "kumodana-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "kumo": "./bin/kumo.js"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kumodana/shared": "0.0.0",
+    "commander": "15.0.0",
+    "exiftool-vendored": "39.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
