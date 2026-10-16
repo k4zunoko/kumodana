@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => ({
 		previewUrls: false,
 		cache: { enabled: true },
 		env: {
-			DB: bindings.d1({ name: "kumodana" }),
+			DB: bindings.d1({ name: "kumodana", id: "862268f4-6ad2-4b54-9690-2b5b6c5d8ec7" }),
 			BUCKET: bindings.r2({ name: "kumodana" }),
 		},
 	},

@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
 			// Cleanup of abandoned uploads and interrupted deletions (FR-008).
 			triggers: [triggers.scheduled({ schedule: "*/15 * * * *" })],
 			env: {
-				DB: bindings.d1({ name: "kumodana" }),
+				DB: bindings.d1({ name: "kumodana", id: "862268f4-6ad2-4b54-9690-2b5b6c5d8ec7" }),
 				BUCKET: bindings.r2({ name: "kumodana" }),
 				// The delivery Worker is not available in unit tests; purge.ts reports that case.
 				...(isTest ? {} : { FILES: bindings.worker({ worker: "kumo" }) }),
