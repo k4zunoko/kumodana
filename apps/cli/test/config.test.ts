@@ -16,8 +16,8 @@ async function tempConfigDir(content?: unknown): Promise<string> {
 
 describe("config", () => {
 	it("uses %APPDATA% on Windows and XDG_CONFIG_HOME elsewhere", () => {
-		expect(configFilePath({ APPDATA: "C:\Users\me\AppData\Roaming" }, "win32")).toBe(
-			join("C:\Users\me\AppData\Roaming", "kumodana", "config.json"),
+		expect(configFilePath({ APPDATA: String.raw`C:\Users\me\AppData\Roaming` }, "win32")).toBe(
+			join(String.raw`C:\Users\me\AppData\Roaming`, "kumodana", "config.json"),
 		);
 		expect(configFilePath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe(join("/xdg", "kumodana", "config.json"));
 	});
