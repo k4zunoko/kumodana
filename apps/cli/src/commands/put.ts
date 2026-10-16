@@ -55,6 +55,15 @@ async function upload(
 			const existing = await findExisting(api, sha256).catch(() => undefined);
 			if (existing) return { file: existing, duplicate: true };
 		}
+		if (error instanceof CliError && error.code === "upload_in_progress") {
+			const seconds = Number(error.details?.retryAfterSeconds ?? 0);
+			const minutes = Math.max(1, Math.ceil(seconds / 60));
+			throw new CliError(`${error.message}あと約 ${minutes} 分待ってから、もう一度置いてください。`, {
+				code: error.code,
+				details: error.details,
+				hint: "前回のアップロードが途中で止まった場合も、10 分を過ぎれば置き直せます。",
+			});
+		}
 		throw error;
 	}
 }

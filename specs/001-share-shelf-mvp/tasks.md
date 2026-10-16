@@ -155,19 +155,19 @@ description: "Task list for 001-share-shelf-mvp"
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T057 [P] [US3] Quota tests in `apps/admin/test/quota.test.ts`（上限 `"1000"`）: exceeding → 413 with `details.usedBytes`、`details.limitBytes`、`details.requestedBytes`; `pending` and `deleting` files are counted; two concurrent uploads that together exceed the limit → exactly one succeeds
-- [ ] T058 [P] [US3] Usage tests in `apps/admin/test/usage.test.ts`（`GET /api/usage` の各値、`remainingBytes` は 0 未満にならない）
-- [ ] T059 [P] [US3] Cleanup tests in `apps/admin/test/cleanup.test.ts`: `pending` older than 30 minutes and `deleting` older than 15 minutes（いずれも `updated_at` 基準）are removed from R2 and D1; newer ones and `ready` are kept; a missing R2 object does not stop the row deletion
-- [ ] T060 [P] [US3] Re-upload tests in `apps/admin/test/reupload.test.ts`: a `pending` duplicate updated more than 10 minutes ago is replaced（古い R2 オブジェクトと行を削除して 201）; within 10 minutes → 409 with `details.retryAfterSeconds`; a `deleting` file with the same SHA-256 does not block a new upload
-- [ ] T061 [P] [US3] CLI tests in `apps/cli/test/usage.test.ts`（`kumo usage`）and the 409 message with the wait time in `apps/cli/test/put.test.ts`
+- [X] T057 [P] [US3] Quota tests in `apps/admin/test/quota.test.ts`（上限 `"1000"`）: exceeding → 413 with `details.usedBytes`、`details.limitBytes`、`details.requestedBytes`; `pending` and `deleting` files are counted; two concurrent uploads that together exceed the limit → exactly one succeeds
+- [X] T058 [P] [US3] Usage tests in `apps/admin/test/usage.test.ts`（`GET /api/usage` の各値、`remainingBytes` は 0 未満にならない）
+- [X] T059 [P] [US3] Cleanup tests in `apps/admin/test/cleanup.test.ts`: `pending` older than 30 minutes and `deleting` older than 15 minutes（いずれも `updated_at` 基準）are removed from R2 and D1; newer ones and `ready` are kept; a missing R2 object does not stop the row deletion
+- [X] T060 [P] [US3] Re-upload tests in `apps/admin/test/reupload.test.ts`: a `pending` duplicate updated more than 10 minutes ago is replaced（古い R2 オブジェクトと行を削除して 201）; within 10 minutes → 409 with `details.retryAfterSeconds`; a `deleting` file with the same SHA-256 does not block a new upload
+- [X] T061 [P] [US3] CLI tests in `apps/cli/test/usage.test.ts`（`kumo usage`）and the 409 message with the wait time in `apps/cli/test/put.test.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T062 [US3] Implement `getUsage()` in `apps/admin/src/db/usage.ts`（`SELECT COALESCE(SUM(size), 0), COUNT(*) FROM files`）and add quota `details` to the 413 response in `apps/admin/src/routes/files.ts`
-- [ ] T063 [US3] Implement replacement of stale `pending` duplicates（更新から 10 分超）and `retryAfterSeconds` in `apps/admin/src/routes/files.ts` per contracts/admin-api.md
-- [ ] T064 [US3] Implement `GET /api/usage` in `apps/admin/src/routes/usage.ts`（`app.ts` に登録、`remainingBytes = max(0, limitBytes - usedBytes)`）
-- [ ] T065 [US3] Implement `apps/admin/src/cleanup.ts`（`pending` は 30 分、`deleting` は 15 分、いずれも `updated_at` 基準で R2 → 行の順に削除）, wire it to `scheduled` in `apps/admin/src/index.ts`, and add `triggers.scheduled({ schedule: "*/15 * * * *" })` to `apps/admin/cloudflare.config.ts`
-- [ ] T066 [US3] Implement `kumo usage` in `apps/cli/src/commands/usage.ts`（`main.ts` に登録）and show `retryAfterSeconds` for 409 in `apps/cli/src/commands/put.ts`
+- [X] T062 [US3] Implement `getUsage()` in `apps/admin/src/db/usage.ts`（`SELECT COALESCE(SUM(size), 0), COUNT(*) FROM files`）and add quota `details` to the 413 response in `apps/admin/src/routes/files.ts`
+- [X] T063 [US3] Implement replacement of stale `pending` duplicates（更新から 10 分超）and `retryAfterSeconds` in `apps/admin/src/routes/files.ts` per contracts/admin-api.md
+- [X] T064 [US3] Implement `GET /api/usage` in `apps/admin/src/routes/usage.ts`（`app.ts` に登録、`remainingBytes = max(0, limitBytes - usedBytes)`）
+- [X] T065 [US3] Implement `apps/admin/src/cleanup.ts`（`pending` は 30 分、`deleting` は 15 分、いずれも `updated_at` 基準で R2 → 行の順に削除）, wire it to `scheduled` in `apps/admin/src/index.ts`, and add `triggers.scheduled({ schedule: "*/15 * * * *" })` to `apps/admin/cloudflare.config.ts`
+- [X] T066 [US3] Implement `kumo usage` in `apps/cli/src/commands/usage.ts`（`main.ts` に登録）and show `retryAfterSeconds` for 409 in `apps/cli/src/commands/put.ts`
 
 **Checkpoint**: US1〜US3 が独立して動く。ここで初めて本番に公開できる（Phase 7 の T078 と T079 を先に終える）
 

@@ -12,6 +12,7 @@ import {
 	listBySha256,
 	markReady,
 } from "../db/files.ts";
+import { getUsage } from "../db/usage.ts";
 import { ApiError } from "../errors.ts";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -65,7 +66,15 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 			return c.json({ file, duplicate: true }, 200);
 		}
 		if (existing?.status === "pending") {
-			throw new ApiError(409, "upload_in_progress");
+			const age = deps.now() - existing.updated_at;
+			if (age < PENDING_GRACE_MS) {
+				throw new ApiError(409, "upload_in_progress", undefined, {
+					retryAfterSeconds: Math.ceil((PENDING_GRACE_MS - age) / 1000),
+				});
+			}
+			// An interrupted upload of the same content: replace it (FR-008).
+			await c.env.BUCKET.delete(existing.r2_key);
+			await deleteRow(c.env.DB, existing.id);
 		}
 
 		let id = newFileId();
@@ -82,7 +91,14 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 				storageLimit(c.env),
 			);
 		}
-		if (inserted === "quota") throw new ApiError(413, "quota_exceeded");
+		if (inserted === "quota") {
+			const usage = await getUsage(c.env.DB, storageLimit(c.env));
+			throw new ApiError(413, "quota_exceeded", undefined, {
+				usedBytes: usage.usedBytes,
+				limitBytes: usage.limitBytes,
+				requestedBytes: size,
+			});
+		}
 		if (inserted === "duplicate") throw new ApiError(409, "upload_in_progress");
 		if (inserted !== "inserted") throw new ApiError(500, "internal_error");
 

@@ -16,6 +16,7 @@ let files: StoredFile[] = [];
 let requests: string[] = [];
 let server: Awaited<ReturnType<typeof mockApi>>;
 let dir: string;
+let putConflict = false;
 
 function summary(file: StoredFile) {
 	const { body: _body, ...rest } = file;
@@ -25,6 +26,7 @@ function summary(file: StoredFile) {
 beforeEach(async () => {
 	files = [];
 	requests = [];
+	putConflict = false;
 	dir = await mkdtemp(join(tmpdir(), "kumo-put-test-"));
 	server = await mockApi((req, body, res: ServerResponse) => {
 		const url = new URL(req.url ?? "/", "http://x");
@@ -34,6 +36,11 @@ beforeEach(async () => {
 			return sendJson(res, 200, { files: files.filter((f) => f.sha256 === sha).map(summary), nextCursor: null });
 		}
 		if (req.method === "PUT" && url.pathname === "/api/files") {
+			if (putConflict) {
+				return sendJson(res, 409, {
+					error: { code: "upload_in_progress", message: "同じ内容のファイルをアップロード中です。", details: { retryAfterSeconds: 120 } },
+				});
+			}
 			const file: StoredFile = {
 				id: `id${String(files.length).padStart(8, "0")}`,
 				name: decodeURIComponent(String(req.headers["x-kumodana-filename"])),
@@ -148,6 +155,16 @@ describe("kumo put", () => {
 		expect(code).toBe(1);
 		expect(files).toHaveLength(1);
 		expect(allOutput(captured)).toContain("動画");
+	});
+
+	it("shows how long to wait when the same content is still uploading", async () => {
+		const path = join(dir, "page.html");
+		await writeFile(path, "<!doctype html><p>busy</p>");
+		putConflict = true;
+		const { runtime, captured } = testRuntime(server.url);
+		const code = await put(runtime, [path], {});
+		expect(code).toBe(1);
+		expect(allOutput(captured)).toContain("2 分");
 	});
 
 	it("prints JSON with --json", async () => {

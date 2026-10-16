@@ -3,6 +3,7 @@ import type { Runtime } from "../runtime.ts";
 import { registerGet } from "./get.ts";
 import { registerLink } from "./link.ts";
 import { registerPut } from "./put.ts";
+import { registerUsage } from "./usage.ts";
 
 /** Wraps a command body so it receives the runtime and sets the exit code. */
 export type Wrap = (
@@ -12,4 +13,4 @@ export type Wrap = (
 export type Register = (program: Command, wrap: Wrap) => void;
 
 /** Every kumo command, in help order. */
-export const commands: Register[] = [registerPut, registerGet, registerLink];
+export const commands: Register[] = [registerPut, registerGet, registerLink, registerUsage];

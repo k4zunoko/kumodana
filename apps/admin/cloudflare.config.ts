@@ -1,4 +1,4 @@
-import { bindings, defineConfig } from "cf/config";
+import { bindings, defineConfig, triggers } from "cf/config";
 import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
 
 /**
@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
 			entrypoint,
 			workersDev: true,
 			previewUrls: false,
+			// Cleanup of abandoned uploads and interrupted deletions (FR-008).
+			triggers: [triggers.scheduled({ schedule: "*/15 * * * *" })],
 			env: {
 				DB: bindings.d1({ name: "kumodana" }),
 				BUCKET: bindings.r2({ name: "kumodana" }),
