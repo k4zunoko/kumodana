@@ -1,7 +1,7 @@
 # Contract: 管理 API（`kumodana-admin`）
 
 **Base URL**: `https://kumodana-admin.meshnode.workers.dev`
-**利用者**: `kumo` CLI のみ（MVP）。関連: [data-model.md](../data-model.md)
+**利用者**: kumo CLI のみ（MVP）。関連: [data-model.md](../data-model.md)
 
 ## 共通事項
 
@@ -23,7 +23,8 @@
 
 ### 応答
 
-- すべての応答に `Cache-Control: no-store` を付ける。
+- すべての応答に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、
+  `Content-Security-Policy: sandbox` を付ける。
 - 成功時の本文は JSON（`content` の取得を除く）。日時は ISO 8601（UTC）。
 - エラー時の本文:
 
@@ -36,8 +37,7 @@
 ```ts
 type FileSummary = {
   id: string; name: string; contentType: string; size: number; sha256: string;
-  createdAt: string; tags: string[]; albums: { id: string; name: string }[];
-  activeLinkCount: number;
+  createdAt: string; tags: string[]; activeLinkCount: number;
 };
 type Link = {
   token: string; fileId: string; url: string; label: string | null;
@@ -45,9 +45,11 @@ type Link = {
 };
 type PurgeResult = { ok: true } | { ok: false; error: string };
 type Usage = { usedBytes: number; limitBytes: number; remainingBytes: number; fileCount: number };
+type TagCount = { tag: string; fileCount: number };
 ```
 
-`Link.url` は `FILES_BASE_URL` + `/` + `token`（例: `https://kumo.meshnode.workers.dev/<token>`）。
+- `Link.url` は `FILES_BASE_URL` + `/` + `token`（例: `https://kumo.meshnode.workers.dev/<token>`）。
+- `ready` 以外のファイルは、どのエンドポイントでも「存在しない」として扱う（削除のやり直しを除く）。
 
 ## エンドポイント
 
@@ -63,12 +65,17 @@ type Usage = { usedBytes: number; limitBytes: number; remainingBytes: number; fi
   - `Content-Length`: 1〜99999999
   - `X-Kumodana-Sha256`: 内容の SHA-256（小文字 16 進 64 文字）
   - `X-Kumodana-Filename`: 元のファイル名（UTF-8 をパーセントエンコード）
-- 処理順: ヘッダー検証 → 同一内容の確認 → 上限付きで `pending` 作成 → R2 へ保存（`sha256` で検証） → `ready` に更新
+- 処理順: ヘッダー検証 → 同じ内容の確認（下記） → 上限付きで `pending` を作成 → R2 へ保存（`sha256` で検証） →
+  `ready` に更新
+- 同じ内容の確認:
+  - `ready` がある → 本文を読まずに 200（`duplicate: true`）
+  - `pending` があり、更新から 10 分以内 → 409 `upload_in_progress`（`details: { retryAfterSeconds }`）
+  - `pending` があり、更新から 10 分を超えている → その R2 オブジェクトと行を消してから続行
 - 応答:
   - 201 `{ "file": FileSummary, "duplicate": false }`
-  - 200 `{ "file": FileSummary, "duplicate": true }` — 同じ内容が `ready` で存在（本文は保存しない）
+  - 200 `{ "file": FileSummary, "duplicate": true }`
   - 400 `invalid_request` — ヘッダーの形式が不正
-  - 409 `upload_in_progress` — 同じ内容が `pending`
+  - 409 `upload_in_progress` — `details: { retryAfterSeconds }`
   - 411 `length_required` — `Content-Length` がない
   - 413 `file_too_large` — `Content-Length` が上限以上
   - 413 `quota_exceeded` — `details: { usedBytes, limitBytes, requestedBytes }`
@@ -78,9 +85,10 @@ type Usage = { usedBytes: number; limitBytes: number; remainingBytes: number; fi
 
 ### `GET /api/files`
 
-- クエリ: `tag`（1 つ）、`album`（アルバム ID）、`sha256`、`limit`（1〜200、既定 50）、`cursor`
-- `ready` のファイルだけを新しい順で返す
+- クエリ: `tag`（0〜10 個。複数指定時はすべてのタグを持つファイル）、`sha256`、`limit`（1〜200、既定 50）、`cursor`
+- `ready` のファイルだけを新しい順で返す。該当がなければ空の配列
 - 200: `{ "files": FileSummary[], "nextCursor": string | null }`
+- 400 `invalid_tag` — タグの形式が不正
 
 ### `GET /api/files/{id}`
 
@@ -90,16 +98,16 @@ type Usage = { usedBytes: number; limitBytes: number; remainingBytes: number; fi
 ### `GET /api/files/{id}/content` — 所有者による取得
 
 - 200: ファイルの内容。`Content-Type` は保存時の値、
-  `Content-Disposition: attachment; filename*=UTF-8''<元のファイル名>`
+  `Content-Disposition: attachment; filename*=UTF-8''<元のファイル名>`（共通の防御用ヘッダーも付く）
 - 404 `not_found`
 
 ### `DELETE /api/files/{id}`
 
-- 処理順: 有効なリンクをすべて取り消す → リンクを発行したことがあれば配信用のキャッシュを削除（タグ `f:<id>`） →
-  R2 から削除 → 行を削除
-- 200: `{ "deleted": "<id>", "revokedLinks": number }`
+- 処理は data-model.md の「削除の手順」に従う。`deleting` のファイルに対しては、やり直しとして手順 2 から続ける
+- 200: `{ "deleted": "<id>", "revokedLinks": number, "purge": PurgeResult | null, "completed": boolean }`
+  - `purge` はキャッシュの削除が不要（リンクを発行したことがない）なら `null`
+  - `completed: false` は、キャッシュの削除に失敗して `deleting` のまま残ったことを示す（60 分以内に自動で完了）
 - 404 `not_found`
-- 502 `purge_failed` — `details: { error }`。リンクの取り消しは記録済み。同じ要求をやり直すと続きから処理する
 
 ### `PATCH /api/files/{id}/tags`
 
@@ -107,29 +115,10 @@ type Usage = { usedBytes: number; limitBytes: number; remainingBytes: number; fi
 - 200: `{ "tags": string[] }`（正規化済み）
 - 400 `invalid_tag`、404 `not_found`
 
-### `GET /api/albums`
+### `GET /api/tags` — タグの一覧
 
-- 200: `{ "albums": { id, name, fileCount, createdAt }[] }`（名前順）
-
-### `POST /api/albums`
-
-- 本文: `{ "name": string }`
-- 201: `{ "album": { id, name, fileCount, createdAt } }`
-- 409 `album_exists`
-
-### `DELETE /api/albums/{id}`
-
-- アルバムと所属情報だけを削除する（ファイルとリンクは残る）
-- 200: `{ "deleted": "<id>" }`、404 `not_found`
-
-### `POST /api/albums/{id}/files`
-
-- 本文: `{ "fileIds": string[] }`（1〜100 件、指定順に末尾へ追加。既に含まれるものは何もしない）
-- 200: `{ "added": number }`、404 `not_found`（アルバムまたはファイル）
-
-### `DELETE /api/albums/{id}/files/{fileId}`
-
-- 200: `{ "removed": true }`、404 `not_found`
+- `ready` のファイルに付いているタグを、ファイル数の多い順（同数ならタグ名の順）で返す
+- 200: `{ "tags": TagCount[] }`
 
 ### `POST /api/files/{id}/links`
 
@@ -145,15 +134,19 @@ type Usage = { usedBytes: number; limitBytes: number; remainingBytes: number; fi
 
 - 処理順: `revoked_at` を記録（取り消し済みなら維持） → 配信用のキャッシュを削除（タグ `l:<token>`）
 - 200: `{ "link": Link, "purge": PurgeResult }` — 削除に失敗しても取り消し自体は成功として 200 を返し、
-  `purge.ok = false` で知らせる。同じ要求をやり直すと、キャッシュの削除だけをやり直す
+  `purge.ok = false` で知らせる。同じ要求をやり直すと、キャッシュの削除だけをやり直す。やり直さなくても、
+  エッジのキャッシュは最長 1 時間で切れる
 - 404 `not_found`
 
 ## 定期実行（`scheduled`）
 
-- 15 分ごと。`pending` のまま 30 分を超えたファイルについて、R2 のオブジェクト（あれば）と行を削除する。
+- 15 分ごとに実行する。
+  - `pending` のまま `updated_at` から 30 分を超えたファイル: R2 のオブジェクト（あれば）と行を削除する
+  - `deleting` のまま `updated_at` から 60 分を超えたファイル: R2 のオブジェクト（あれば）と行を削除する
+- どちらも、途中で失敗したものは次回に再び処理する。
 
 ## エラーコード一覧
 
 `unauthenticated`、`forbidden`、`cross_site_request`、`invalid_request`、`not_found`、`length_required`、
 `file_too_large`、`unsupported_type`、`quota_exceeded`、`upload_in_progress`、`checksum_mismatch`、
-`storage_error`、`purge_failed`、`invalid_tag`、`album_exists`、`internal_error`
+`storage_error`、`invalid_tag`、`internal_error`

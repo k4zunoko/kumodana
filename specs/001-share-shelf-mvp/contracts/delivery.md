@@ -9,7 +9,7 @@
 |---|---|
 | `GET`/`HEAD /{token}`（`token` は `^[A-Za-z0-9_-]{22}$`）で、有効なリンクかつ `ready` のファイル | `200` と内容 |
 | 上記と同じパスにクエリ文字列が付いている | `301`、`Location: /{token}`（内容は返さない） |
-| 取り消し済み・存在しない・削除済み・処理中のファイル | `404`（本文 `Not Found`、すべて同一） |
+| 取り消し済み・存在しない・削除済み・処理中（`pending`）・削除中（`deleting`）のファイル | `404`（本文 `Not Found`、すべて同一） |
 | `/`、トークン形式でないパス、パスの後ろに余分な要素 | `404`（同上） |
 | `GET`/`HEAD` 以外のメソッド | `405`、`Allow: GET, HEAD` |
 
@@ -36,7 +36,7 @@
 | `ETag` | `"<sha256>"` |
 | `Content-Disposition` | `inline; filename*=UTF-8''<元のファイル名>` |
 | `Cache-Control` | `public, max-age=60` |
-| `Cloudflare-CDN-Cache-Control` | `public, max-age=86400` |
+| `Cloudflare-CDN-Cache-Control` | `public, max-age=3600, stale-if-error=0` |
 | `Cache-Tag` | `l:<token>,f:<fileId>`（Cloudflare が取り除くため閲覧者には届かない） |
 
 ### `200` 以外
@@ -51,3 +51,6 @@
   （デプロイごとにキャッシュは空から始まる）。
 - キャッシュのキーはパスとクエリ文字列で決まり、ホスト名を含まない。このため `previewUrls: false` とし、
   配信用 Worker を公開するホストは 1 つに限る。
+- エッジでの保持は最長 1 時間。取り消しや削除でキャッシュの削除に失敗しても、1 時間で必ず切れる（FR-019、FR-028）。
+- `stale-if-error=0` により、Worker がエラーを返したときに期限切れの内容を返し続けることを防ぐ。
+  取り消し済みのリンクが、この経路で見え続けないようにするため。

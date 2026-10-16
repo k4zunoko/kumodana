@@ -6,16 +6,21 @@
 
 ## Summary
 
-自分専用の共有棚を、Cloudflare の Workers、R2、D1、Access、Workers Cache で作る。所有者は `kumo` CLI から
-管理用 Worker（`kumodana-admin`、Access と JWT 検証で保護）を通じてファイルを置き、リンクを発行・取り消す。
-閲覧者は配信用 Worker（`kumo`、Workers Cache 有効）からリンクで閲覧する。
+自分専用の共有棚を、Cloudflare の Workers、R2、D1、Access、Workers Cache で作る。所有者は kumo CLI から
+管理用 Worker（`kumodana-admin`、Access と JWT 検証で保護）を通じてファイルを置き、タグで整理し、リンクを
+発行・取り消す。閲覧者は配信用 Worker（`kumo`、Workers Cache 有効）からリンクで閲覧する。
+
+**用語**: 文書では、コマンドを「kumo CLI」、配信用の Worker を「配信用 Worker（`kumo`）」と書き分ける。
+配信用 Worker のソースは `apps/files`、管理用 Worker からのサービスバインディング名は `FILES`。
 
 技術的な要点（詳細は [research.md](./research.md)）:
 
 - Worker を管理用と配信用に分け、キャッシュの削除は配信用の RPC `purge(tags)` で行う
-- 保存量の上限は、処理中を含む合計を条件にした 1 文の `INSERT` で原子的に判定する
+- 保存量の上限は、処理中・削除中を含む合計を条件にした 1 文の `INSERT` で原子的に判定する
+- ファイルの状態を `pending`・`ready`・`deleting` で管理し、「`ready` なら R2 に実体がある」を常に保つ
 - 重い処理（EXIF の削除、SHA-256、形式の判定）は CLI で行い、Worker は R2 へ流し込むだけにする
-- 配信するすべての応答に CSP の `sandbox` などの防御用ヘッダーを付ける
+- 配信するすべての応答に CSP の `sandbox` などの防御用ヘッダーを付ける。エッジの保持は最長 1 時間
+- 整理はタグだけ（複数タグの AND 絞り込みと、件数付きのタグ一覧）。アルバムは作らない（憲法 v2.0.0）
 
 ## Technical Context
 
@@ -57,12 +62,12 @@ Worker を動かさない（SC-007）
 | 原則 | この計画での対応 | 判定 |
 |---|---|---|
 | I. 原本は手元、棚には共有用のコピーだけ | CLI は原本を読み取るだけで、EXIF の削除は一時コピーで行う。バックアップ機能は持たない | PASS |
-| II. 既定は非公開、共有はリンクで行う | リンクなしのファイルは配信されない。トークンは 128 ビット。取り消しは D1 の記録＋タグでのキャッシュ削除。削除の失敗は `purge.ok=false` で知らせる。ブラウザ側の保持は 60 秒。公開一覧・期限付きリンクなし | PASS |
-| III. 書き込み経路は管理 API だけ | R2 と D1 への書き込みは管理用 Worker のみ。配信用 Worker は読み取りと自身のキャッシュ削除だけ。処理中の残骸は定期実行で片付ける | PASS |
+| II. 既定は非公開、共有はリンクで行う | リンクなしのファイルは配信されない。トークンは 128 ビット。取り消しは D1 の記録＋タグでのキャッシュ削除。削除の失敗は `purge.ok=false` で知らせる。ブラウザ側の保持は 60 秒、エッジは最長 1 時間（失敗時の最悪値）。公開一覧・期限付きリンクなし | PASS |
+| III. 書き込み経路は管理 API だけ | R2 と D1 への書き込みは管理用 Worker のみ。配信用 Worker は読み取りと自身のキャッシュ削除だけ。R2 の実体を消すのは `pending`・`deleting` のときだけで、`ready` には必ず実体がある。残骸は定期実行で片付ける | PASS |
 | IV. 多層防御 | Worker 単位の Access ＋ jose による JWT 検証。Worker を 2 つに分け、`previewUrls: false`。全配信応答に sandbox などのヘッダー。管理 API は独自ヘッダー必須・他オリジンを拒否。EXIF は既定で削除。個人の識別子とシークレットは `--secrets-file`（gitignore） | PASS |
 | V. コストには上限を設ける | Workers 無料プラン。上限は 1 文の条件付き `INSERT`。配信は Workers Cache、クエリ付きは 301。重い処理は CLI。予算アラートと緊急停止は runbook | PASS |
 | VI. 重要な経路は自動テストで守る | 認証、CSRF、上限、リンクの解決と取り消し、配信ヘッダーを `@cloudflare/vitest-plugin` で workerd 上でテスト。デプロイ前に型検査とテスト | PASS |
-| VII. 小さく保つ | MVP の範囲のみ。依存は憲法の基準どおり（形式判定は自前で `file-type` を使わない）。ベータ版ツールは完全固定 | PASS |
+| VII. 小さく保つ | MVP の範囲のみ。整理はタグだけでアルバム・ギャラリーなし。依存は憲法の基準どおり（形式判定は自前で `file-type` を使わない）。ベータ版ツールは完全固定 | PASS |
 
 **Phase 1 後の再確認**: data-model と contracts を確認し、違反はない。2 つの Worker と共有パッケージ 1 つの構成は、
 憲法 IV（Worker の分離）と R2・R13 の理由により必要で、より少ない構成は要件を満たせない（Complexity Tracking には
@@ -103,7 +108,7 @@ packages/
     │   ├── api-types.ts     # FileSummary、Link、Usage、PurgeResult、エラーコード
     │   ├── limits.ts        # 許可する形式、最大サイズ
     │   ├── ids.ts           # ID とトークンの生成・検証
-    │   └── names.ts         # タグとアルバム名の正規化・検証
+    │   └── names.ts         # タグの正規化・検証
     └── test/
 
 apps/
@@ -114,14 +119,15 @@ apps/
 │   ├── migrations/
 │   │   └── 0001_init.sql
 │   ├── src/
-│   │   ├── index.ts         # Hono アプリと scheduled ハンドラー
+│   │   ├── index.ts         # エントリ（fetch と scheduled）
+│   │   ├── app.ts           # Hono アプリの組み立て（CSRF → 認証 → ルート）
 │   │   ├── auth.ts          # Access JWT の検証と主体の判定
 │   │   ├── csrf.ts          # 独自ヘッダー・Origin・Sec-Fetch-Site の検査
 │   │   ├── errors.ts        # エラー応答の生成
 │   │   ├── purge.ts         # FILES.purge の呼び出し（テストで差し替え可能）
-│   │   ├── db/              # files、links、albums、tags、usage の SQL
-│   │   ├── routes/          # usage、files、tags、albums、links
-│   │   └── cleanup.ts       # 処理中の残骸の片付け
+│   │   ├── db/              # files、links、tags、usage の SQL
+│   │   ├── routes/          # usage、files、tags、links（app.ts で登録）
+│   │   └── cleanup.ts       # pending と deleting の片付け
 │   └── test/
 ├── files/                   # Worker: kumo
 │   ├── cloudflare.config.ts # D1、R2、cache、workersDev、previewUrls、停止用モード
@@ -140,7 +146,7 @@ apps/
     │   ├── sniff.ts         # 形式の判定
     │   ├── exif.ts          # EXIF の削除（一時コピー）
     │   ├── output.ts        # 人向けと JSON の出力、終了コード
-    │   └── commands/        # put、ls、get、rm、tag、album、link、usage
+    │   └── commands/        # put、ls、get、rm、tag、tags、link、usage
     └── test/
 ```
 
