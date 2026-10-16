@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CliError } from "../src/errors.ts";
-import { formatBytes, printError, printResult } from "../src/output.ts";
+import { displayWidth, formatBytes, printError, printResult } from "../src/output.ts";
 import { captureOutput, SECRET } from "./helpers.ts";
 
 describe("output", () => {
@@ -40,5 +40,11 @@ describe("output", () => {
 		expect(formatBytes(999)).toBe("999 B");
 		expect(formatBytes(1500)).toBe("1.5 KB");
 		expect(formatBytes(5_000_000)).toBe("5.0 MB");
+	});
+
+	it("measures display width with wide characters", () => {
+		expect(displayWidth("abc")).toBe(3);
+		expect(displayWidth("旅行")).toBe(4);
+		expect(displayWidth("2026年")).toBe(6);
 	});
 });

@@ -75,3 +75,23 @@ export function formatBytes(bytes: number): string {
 	}
 	return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
 }
+
+/** Terminal display width: East Asian wide characters and emoji take two columns. */
+export function displayWidth(text: string): number {
+	let width = 0;
+	for (const char of text) {
+		const code = char.codePointAt(0) ?? 0;
+		const wide =
+			(code >= 0x1100 && code <= 0x115f) ||
+			(code >= 0x2e80 && code <= 0xa4cf) ||
+			(code >= 0xac00 && code <= 0xd7a3) ||
+			(code >= 0xf900 && code <= 0xfaff) ||
+			(code >= 0xfe30 && code <= 0xfe4f) ||
+			(code >= 0xff00 && code <= 0xff60) ||
+			(code >= 0xffe0 && code <= 0xffe6) ||
+			(code >= 0x1f300 && code <= 0x1faff) ||
+			(code >= 0x20000 && code <= 0x3fffd);
+		width += wide ? 2 : 1;
+	}
+	return width;
+}

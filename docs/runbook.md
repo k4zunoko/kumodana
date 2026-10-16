@@ -72,7 +72,11 @@ npm run deploy -w @kumodana/admin   # 管理用 Worker（--secrets-file を付�
 
 ## 6. 管理用 Worker に Access をかける
 
-### ダッシュボードで設定する（推奨）
+2026-10-16 に下記「API で設定する場合」の手順で作成済み（アプリ名 `kumodana-admin`、ポリシー `owner` と
+`kumodana-cli`）。ブラウザでのログインは Cloudflare アカウントでのログイン（Zero Trust の既定の
+ログイン方法）を使う。
+
+### ダッシュボードで設定する
 
 1. Workers & Pages → `kumodana-admin` → **Access** タブ → **Protect this Worker behind Access**
 2. **All traffic** を選び、ポリシーで自分のメールアドレスだけを許可する
@@ -101,8 +105,10 @@ npm run deploy -w @kumodana/admin   # 管理用 Worker（--secrets-file を付�
 ```
 
 ```sh
-npx cf zero-trust access applications create --body "$(cat access-app.json)"
+npx cf zero-trust access applications create --body "@C:\path	occess-app.json"
 ```
+
+Windows の Git Bash では `--body "$(cat ...)"` が JSON として解釈されないため、`@<Windows のパス>` で渡す。
 
 ## 7. CLI の設定
 
@@ -125,8 +131,11 @@ npm install -g ./apps/cli    # kumo コマンドを登録（ビルド不要。No
 
 ## 8. 予算アラートと使用量の通知（憲法 V、FR-038）
 
-- ダッシュボードの Billing（課金）→ **Budget alerts** で、しきい値 **$1** のアラートを作る
-- Notifications → **Usage Based Billing** で、R2 の保存量に通知を作る（例: 8 GB）
+- ダッシュボードの Manage Account → Billing → Billable Usage → **Budget alerts** でアラートを作る
+  - 2026-10-16 時点: 所有者が作った `all usage`（**$0.01**、少しでも課金が発生したら通知）と、自動で作られた
+    `Default budget alert`（$10）がある
+- R2 の保存量ごとの通知（Notifications → Usage Based Billing）は、$0.01 の予算アラートで超過を検知できるため作っていない
+- サービストークンの期限切れ通知（Expiring Service Token Alert）は Zero Trust の有効化時に自動で作られている
 
 ## 9. 緊急停止（FR-037）
 
@@ -157,9 +166,25 @@ npm run resume -w @kumodana/files   # 再開
 |---|---|---|
 | R9: EXIF 削除で Orientation と ICC_Profile が残る | 確認済み（`apps/cli/test/exif.test.ts`、JPEG と PNG） | 2026-10-16 |
 | R16: 型除去での CLI 実行（Windows、`npm install -g ./apps/cli`、`@kumodana/shared` の読み込みを含む） | 確認済み（`kumo --version`、`kumo --help`） | 2026-10-16 |
-| R15: `--mode stopped` で workers.dev の公開が止まる | ローカルの `cf workers triggers deploy --mode stopped --dry-run` で `workersDev: false` になることを確認。**本番での確認は初回デプロイ後に行う** | 2026-10-16 |
+| R15: `--mode stopped` で workers.dev の公開が止まる | 本番で確認済み。`npm run stop` の約 10 秒後から `error code: 1042`（workers.dev 無効）になり、`npm run resume` で約 10 秒後に復旧 | 2026-10-16 |
 
-## 12. 既知の問題
+## 12. 本番検証の記録（quickstart.md、T084）
+
+初回デプロイ（2026-10-16）での結果。検証用のファイルとリンクは最後に削除した。
+
+| 項目 | 結果 |
+|---|---|
+| SC-001 | 4.8MB の JPEG（位置情報付き）を `kumo put --link --tag` で置いてリンクを得るまで 4.5 秒（社内プロキシ経由） |
+| SC-002 | **未確認**：スマートフォン（iPhone の Safari / Android の Chrome）での表示は所有者が確認する |
+| SC-003 | 取り消しの 3 秒後に 404（エッジのキャッシュ削除が成功）。同じファイルの別リンクは 200 のまま |
+| SC-005 | 配信された画像に GPS とカメラ情報がなく、Orientation は残っている。原本のハッシュと更新日時は不変 |
+| SC-006 | 隔離チェックのページで 7 項目すべて防がれた（`origin` は `null`。Cookie、localStorage、管理 API、他のリンク） |
+| SC-007 | 同じリンクの 2 回目は `CF-Cache-Status: HIT` |
+| FR-022 | `?fbclid=test` 付きは 301 で正規の URL へ転送 |
+| FR-028 | `kumo rm` の 3 秒後に、キャッシュ済みだったリンクも 404。使用量は 0 に戻り、R2 と D1 も空 |
+| 認証 | 認証なしは Access のログイン画面へ 302、誤ったサービストークンは 401（Strict service token authentication は既定で有効） |
+
+## 13. 既知の問題
 
 - **`apps/admin` で `cf build` / `cf dev` が失敗する**（cf 1.0.0-beta.13）。npm workspaces で
   `@cloudflare/vite-plugin` がルートに置かれると「declared ... but is not installed」と表示される。

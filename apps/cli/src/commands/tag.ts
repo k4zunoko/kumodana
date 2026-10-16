@@ -2,7 +2,7 @@ import type { TagListResponse, TagsResponse } from "@kumodana/shared/api-types";
 import { normalizeTag } from "@kumodana/shared/names";
 import type { Command } from "commander";
 import { CliError, EXIT_USAGE } from "../errors.ts";
-import { printResult } from "../output.ts";
+import { displayWidth, printResult } from "../output.ts";
 import type { Runtime } from "../runtime.ts";
 import type { Register } from "./index.ts";
 
@@ -42,8 +42,8 @@ export async function tag(runtime: Runtime, id: string, changes: string[]): Prom
 export async function tagList(runtime: Runtime): Promise<number> {
 	const api = await runtime.api();
 	const result = await api.request<TagListResponse>("GET", "/api/tags");
-	const width = Math.max(0, ...result.tags.map((t) => [...t.tag].length));
-	const lines = result.tags.map((t) => `${t.tag}${" ".repeat(width - [...t.tag].length)}  ${t.fileCount}`);
+	const width = Math.max(0, ...result.tags.map((t) => displayWidth(t.tag)));
+	const lines = result.tags.map((t) => `${t.tag}${" ".repeat(width - displayWidth(t.tag))}  ${t.fileCount}`);
 	printResult(runtime.out, lines.length > 0 ? lines : ["タグはありません。"], result);
 	return 0;
 }
