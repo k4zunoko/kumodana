@@ -105,7 +105,7 @@ npm run deploy -w @kumodana/admin   # 管理用 Worker（--secrets-file を付�
 ```
 
 ```sh
-npx cf zero-trust access applications create --body "@C:\path	occess-app.json"
+npx cf zero-trust access applications create --body "@C:\path\to\access-app.json"
 ```
 
 Windows の Git Bash では `--body "$(cat ...)"` が JSON として解釈されないため、`@<Windows のパス>` で渡す。
