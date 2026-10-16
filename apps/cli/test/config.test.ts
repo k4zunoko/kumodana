@@ -1,0 +1,44 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { configFilePath, loadConfig } from "../src/config.ts";
+import { CliError } from "../src/errors.ts";
+
+async function tempConfigDir(content?: unknown): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "kumo-config-"));
+	if (content !== undefined) {
+		await mkdir(join(dir, "kumodana"), { recursive: true });
+		await writeFile(join(dir, "kumodana", "config.json"), JSON.stringify(content));
+	}
+	return dir;
+}
+
+describe("config", () => {
+	it("uses %APPDATA% on Windows and XDG_CONFIG_HOME elsewhere", () => {
+		expect(configFilePath({ APPDATA: "C:\Users\me\AppData\Roaming" }, "win32")).toBe(
+			join("C:\Users\me\AppData\Roaming", "kumodana", "config.json"),
+		);
+		expect(configFilePath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe(join("/xdg", "kumodana", "config.json"));
+	});
+
+	it("reads the file and lets environment variables override it", async () => {
+		const dir = await tempConfigDir({ adminUrl: "https://file.example/", clientId: "file-id", clientSecret: "file-secret" });
+		const config = await loadConfig({ APPDATA: dir, KUMODANA_CLIENT_ID: "env-id" }, "win32");
+		expect(config).toEqual({ adminUrl: "https://file.example", clientId: "env-id", clientSecret: "file-secret" });
+	});
+
+	it("names the missing keys without showing any secret", async () => {
+		const dir = await tempConfigDir();
+		const error = await loadConfig({ APPDATA: dir, KUMODANA_CLIENT_SECRET: "hidden-secret-value" }, "win32").catch(
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(CliError);
+		const cliError = error as CliError;
+		expect(cliError.message).toContain("KUMODANA_ADMIN_URL");
+		expect(cliError.message).toContain("KUMODANA_CLIENT_ID");
+		expect(cliError.message).not.toContain("KUMODANA_CLIENT_SECRET");
+		expect(`${cliError.message}${cliError.hint}`).not.toContain("hidden-secret-value");
+		expect(cliError.exitCode).toBe(2);
+	});
+});
