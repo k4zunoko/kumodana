@@ -76,8 +76,8 @@ description: "Task list for 001-share-shelf-mvp"
 - [ ] T027 [P] Implement `apps/cli/src/config.ts`: env `KUMODANA_ADMIN_URL`・`KUMODANA_CLIENT_ID`・`KUMODANA_CLIENT_SECRET` override the file `%APPDATA%\kumodana\config.json`（Windows）or `$XDG_CONFIG_HOME/kumodana/config.json`（未設定なら `~/.config/kumodana/config.json`）; missing keys produce an error naming the keys, never the secret
 - [ ] T028 [P] Implement `apps/cli/src/output.ts`: human output to stdout, warnings/errors to stderr, `--json` mode available to every command, exit codes `0`/`1`/`2`, error format「何が起きたか＋どうすればよいか＋エラーコード」, secret redaction
 - [ ] T029 Implement `apps/cli/src/api.ts`: `fetch` client adding `CF-Access-Client-Id`、`CF-Access-Client-Secret`、`X-Kumodana-Client: cli`; parse error bodies into a typed `ApiError`; network errors mention proxy settings（`NODE_USE_ENV_PROXY`、`HTTPS_PROXY`）
-- [ ] T030 Implement `apps/cli/src/main.ts`（commander の `kumo` プログラム、全体オプション `--json`、`--version`。以降のコマンドはすべてここで登録する）and verify on Windows that `npm install -g ./apps/cli` makes `kumo --version` run via Node type stripping, including imports of `@kumodana/shared`（research R16）
-- [ ] T031 [P] CLI tests in `apps/cli/test/config.test.ts` and `apps/cli/test/output.test.ts`: env precedence, missing-key message, the secret never appears in any output（`--json` を含む）
+- [ ] T030 Implement `apps/cli/src/main.ts`（commander の `kumo` プログラム、全体オプション `--json`、`--version`。以降のコマンドはすべてここで登録する）and verify on Windows that `npm install -g ./apps/cli` makes `kumo --version` run via Node type stripping, including imports of `@kumodana/shared`（research R16。結果は T082 で runbook に記録する）
+- [ ] T031 [P] CLI tests in `apps/cli/test/config.test.ts`, `apps/cli/test/output.test.ts`, and `apps/cli/test/api.test.ts`: env precedence, missing-key message, the secret never appears in any output（`--json` を含む）; API errors `401 unauthenticated`・`403 forbidden`・Access のログイン画面へのリダイレクトを、どの資格情報（クライアント ID/シークレット、期限切れの可能性）を確認すべきかが分かるメッセージに変換する
 
 **Checkpoint**: 型検査とテストが通り、認証・CSRF が機能する。ここからストーリーに着手できる
 
@@ -107,11 +107,11 @@ description: "Task list for 001-share-shelf-mvp"
 - [ ] T038 [US1] Implement file queries in `apps/admin/src/db/files.ts`: `insertPendingWithinQuota`（1 文の `INSERT ... SELECT ... WHERE (SELECT COALESCE(SUM(size), 0) FROM files) + ? <= ?`、`meta.changes = 0` は上限超過、部分一意インデックス違反は重複、`created_at = updated_at = now`）、`markReady`、`deleteRow`、`findBySha256`（`deleting` 以外）、`getFileSummary`（タグと有効なリンク数を含む。`ready` 以外は null）
 - [ ] T039 [US1] Implement `PUT /api/files` in `apps/admin/src/routes/files.ts` and register it in `apps/admin/src/app.ts`, per contracts/admin-api.md: validate headers（`Content-Type` は許可リスト、`Content-Length` は 1〜99999999、`X-Kumodana-Sha256` は小文字 16 進 64 文字、`X-Kumodana-Filename` はデコード後 1〜255 文字でパスを含まない）→ duplicate check（`ready` は本文を読まずに 200、`pending` は 409）→ `insertPendingWithinQuota` → `BUCKET.put("files/<id>", request.body, { sha256, httpMetadata: { contentType } })` → 失敗時は行を削除して 422/502 → `markReady` → 201
 - [ ] T040 [US1] Implement `GET /api/files?sha256=` (exact match) and `GET /api/files/:id/content`（`attachment`、共通の防御用ヘッダー）in `apps/admin/src/routes/files.ts`
-- [ ] T041 [US1] Implement link creation: `createLink(fileId, label)` in `apps/admin/src/db/links.ts`（トークンは `@kumodana/shared` の ids）and `POST /api/files/:id/links` in `apps/admin/src/routes/links.ts`, registered in `apps/admin/src/app.ts`（`label` は 0〜200 文字、`ready` のファイルのみ）
+- [ ] T041 [US1] Implement link creation: `createLink(fileId, label)` in `apps/admin/src/db/links.ts`（トークンは `@kumodana/shared` の ids）and `POST /api/files/:id/links` in `apps/admin/src/routes/links.ts`, registered in `apps/admin/src/app.ts`（本文は Zod で検証、`label` は 0〜200 文字、`ready` のファイルのみ）
 - [ ] T042 [US1] Implement delivery in `apps/files/src/index.ts`: token pattern `^[A-Za-z0-9_-]{22}$`; one D1 query joining `links` and `files` with `revoked_at IS NULL AND status = 'ready'`; stream the R2 object with `Content-Type`、`Content-Length`、`ETag: "<sha256>"`、`Content-Disposition: inline; filename*=UTF-8''...`、200-only cache headers from `apps/files/src/headers.ts`、`Cache-Tag: l:<token>,f:<fileId>`; `HEAD` without body; missing R2 object → 404
 - [ ] T043 [P] [US1] Implement `apps/cli/src/sniff.ts` per research R10（マジックバイト、HEIC の判別、SVG/HTML のテキスト判定、HTML の charset）
 - [ ] T044 [P] [US1] Implement `apps/cli/src/exif.ts`: copy to a temp file under `os.tmpdir()`, run exiftool-vendored `deleteAllTags` retaining `Orientation` and `ICC_Profile`, delete the temp file afterwards, call `exiftool.end()` on exit
-- [ ] T045 [US1] Implement `kumo put <path...> [--link] [--label] [--keep-exif]` in `apps/cli/src/commands/put.ts` and register it in `apps/cli/src/main.ts`, per contracts/cli.md steps 1〜6（タグ以外）: SHA-256 with `node:crypto`, read into a Buffer so `Content-Length` is fixed, continue on per-file failure and exit `1`
+- [ ] T045 [US1] Implement `kumo put <path...> [--link] [--label] [--keep-exif]` in `apps/cli/src/commands/put.ts` and register it in `apps/cli/src/main.ts`, per contracts/cli.md steps 1〜6（タグ以外）: SHA-256 with `node:crypto`, read into a Buffer so `Content-Length` is fixed, continue on per-file failure and exit `1`; if sending fails because the server answered early（重複で本文を読まずに 200 を返した場合など）, re-check by SHA-256 and treat an existing `ready` file as a duplicate
 - [ ] T046 [P] [US1] Implement `kumo get <id> [--output <path>]` in `apps/cli/src/commands/get.ts`（既存ファイルは上書きしない）and register it in `apps/cli/src/main.ts`
 - [ ] T047 [P] [US1] Implement `kumo link create <id> [--label <text>]` in `apps/cli/src/commands/link.ts` and register the `link` command group in `apps/cli/src/main.ts`
 
@@ -138,7 +138,7 @@ description: "Task list for 001-share-shelf-mvp"
 - [ ] T052 [US2] Implement RPC `purge(tags)` in `apps/files/src/index.ts` per contracts/files-rpc.md（`this.ctx.cache.purge({ tags })`、例外を投げずに `PurgeResult` を返す）
 - [ ] T053 [US2] Implement the query-string redirect in `apps/files/src/index.ts`（正規のパスへ 301、`no-store`）
 - [ ] T054 [US2] Implement `apps/admin/src/purge.ts`: call `env.FILES.purge(tags)`; missing binding → `{ ok: false, error: "binding_unavailable" }`; catch exceptions; injectable for tests
-- [ ] T055 [US2] Implement `DELETE /api/links/:token` and `GET /api/links` in `apps/admin/src/routes/links.ts`（`app.ts` に登録）with queries `revokeLink` and `listLinks` in `apps/admin/src/db/links.ts`
+- [ ] T055 [US2] Implement `DELETE /api/links/:token` and `GET /api/links` in `apps/admin/src/routes/links.ts`（`app.ts` に登録、クエリは Zod で検証）with queries `revokeLink` and `listLinks` in `apps/admin/src/db/links.ts`
 - [ ] T056 [US2] Implement `kumo link ls [<id>] [--all]` and `kumo link revoke <token|url>` in `apps/cli/src/commands/link.ts`
 
 **Checkpoint**: US1 と US2 が独立して動く
@@ -190,7 +190,7 @@ description: "Task list for 001-share-shelf-mvp"
 ### Implementation for User Story 4
 
 - [ ] T071 [US4] Implement `listFiles`（0〜10 個のタグの AND: `GROUP BY file_id HAVING COUNT(DISTINCT tag) = <指定数>`、`(created_at, id)` によるカーソル、`limit`）in `apps/admin/src/db/files.ts`, and `GET /api/files` with all filters plus `GET /api/files/:id` in `apps/admin/src/routes/files.ts`
-- [ ] T072 [US4] Implement `apps/admin/src/db/tags.ts`（付与、解除、件数付きの一覧）and `PATCH /api/files/:id/tags` and `GET /api/tags` in `apps/admin/src/routes/tags.ts`, registered in `apps/admin/src/app.ts`（`@kumodana/shared` の names で正規化）
+- [ ] T072 [US4] Implement `apps/admin/src/db/tags.ts`（付与、解除、件数付きの一覧）and `PATCH /api/files/:id/tags` and `GET /api/tags` in `apps/admin/src/routes/tags.ts`, registered in `apps/admin/src/app.ts`（本文は Zod で検証し、`@kumodana/shared` の names で正規化）
 - [ ] T073 [US4] Implement `DELETE /api/files/:id` in `apps/admin/src/routes/files.ts` following the deletion steps in data-model.md（D1 のバッチでリンクの取り消しと `deleting` への変更 → 必要ならキャッシュ削除 → 成否にかかわらず R2 → 行の削除。`deleting` のままのファイルへのやり直しは手順 2 から）, using `apps/admin/src/purge.ts`（depends on T054）
 - [ ] T074 [P] [US4] Implement `kumo ls [--tag <tag>]... [--limit]` in `apps/cli/src/commands/ls.ts`（`main.ts` に登録）
 - [ ] T075 [P] [US4] Implement `kumo tag <id> <+tag|-tag>...` in `apps/cli/src/commands/tag.ts` and `kumo tags` in `apps/cli/src/commands/tags.ts`（いずれも `main.ts` に登録）
@@ -205,11 +205,11 @@ description: "Task list for 001-share-shelf-mvp"
 
 **Purpose**: 運用の手順、デプロイ、全体の検証
 
-- [ ] T078 [P] Write `docs/runbook.md`: create D1 `kumodana`（APAC）and R2 `kumodana` and record IDs in both `cloudflare.config.ts`; apply migrations; deploy order（配信用 Worker `kumo` → 管理用 Worker `kumodana-admin`）; `.secrets.production.json` keys; Zero Trust setup; service token creation and renewal（`cf zero-trust access service-tokens create` / `refresh`、期限の記録）; Worker-level Access application（destination type `worker`、所有者のメールを許可＋サービストークンの Service Auth）; strict service token authentication; budget alert（$1）and R2 usage notification; emergency stop（`cf workers triggers deploy --mode stopped` と復旧）; `npx wrangler tail`
+- [ ] T078 [P] Write `docs/runbook.md`: confirm the account stays on the Workers Free plan（憲法 V）; create D1 `kumodana`（APAC）and R2 `kumodana` and record IDs in both `cloudflare.config.ts`; apply migrations; deploy order（配信用 Worker `kumo` → 管理用 Worker `kumodana-admin`）; `.secrets.production.json` keys; Zero Trust setup; service token creation and renewal（`cf zero-trust access service-tokens create` / `refresh`、期限の記録）; Worker-level Access application（destination type `worker`、所有者のメールを許可＋サービストークンの Service Auth）; strict service token authentication; budget alert（$1）and R2 usage notification; emergency stop（`cf workers triggers deploy --mode stopped` と復旧）; `npx wrangler tail`
 - [ ] T079 Add deploy scripts: `deploy` in `apps/files/package.json` and `apps/admin/package.json`（型検査 → テスト → `cf deploy --dry-run` → `cf deploy`、admin は `--secrets-file ../../.secrets.production.json`）and root `deploy` in `package.json`（`kumo` → `kumodana-admin` の順）
 - [ ] T080 [P] Create `docs/verification/isolation-check.html` for SC-006: tries `fetch` to the admin API with `credentials: "include"`, `document.cookie` read/write, `localStorage`, and reading another link, and displays each result
 - [ ] T081 [P] Write `README.md`: purpose, repository structure, kumo CLI setup, links to quickstart.md and `docs/runbook.md`
-- [ ] T082 Verify the open items in research.md（R9: `retain` で Orientation と ICC_Profile が残る、R15: `--mode stopped` で workers.dev の公開が止まる、R16: 型除去での実行）and record results in `docs/runbook.md`
+- [ ] T082 Verify the open items in research.md（R9: `retain` で Orientation と ICC_Profile が残る、R15: `--mode stopped` で workers.dev の公開が止まる）and record them together with the T030 result（R16）in `docs/runbook.md`
 - [ ] T083 Run `npm run typecheck` and `npm test` at repository root and fix all failures
 - [ ] T084 Run the quickstart.md validation against production: SC-001（5MB の画像、上り 10Mbps 以上で 15 秒以内）, SC-002（指定のブラウザ）, SC-003（取り消しから 1 分以内）, `cf-cache-status: HIT`, isolation page, emergency stop drill
 
