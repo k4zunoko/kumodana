@@ -211,7 +211,7 @@ description: "Task list for 001-share-shelf-mvp"
 - [X] T081 [P] Write `README.md`: purpose, repository structure, kumo CLI setup, links to quickstart.md and `docs/runbook.md`
 - [X] T082 Verify the open items in research.md（R9: `retain` で Orientation と ICC_Profile が残る、R15: `--mode stopped` で workers.dev の公開が止まる）and record them together with the T030 result（R16）in `docs/runbook.md`
 - [X] T083 Run `npm run typecheck` and `npm test` at repository root and fix all failures
-- [ ] T084 Run the quickstart.md validation against production: SC-001（5MB の画像、上り 10Mbps 以上で 15 秒以内）, SC-002（指定のブラウザ）, SC-003（取り消しから 1 分以内）, `cf-cache-status: HIT`, isolation page, emergency stop drill
+- [X] T084 Run the quickstart.md validation against production: SC-001（5MB の画像、上り 10Mbps 以上で 15 秒以内）, SC-002（指定のブラウザ）, SC-003（取り消しから 1 分以内）, `cf-cache-status: HIT`, isolation page, emergency stop drill
 
 ---
 
