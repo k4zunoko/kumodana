@@ -1,11 +1,12 @@
 import { createApp } from "./app.ts";
 import { remoteKeys } from "./auth.ts";
+import { purgeViaBinding } from "./purge.ts";
 import { routes } from "./routes/index.ts";
 
 const app = createApp(
 	{
 		keys: remoteKeys,
-		purge: async () => ({ ok: false, error: "not_implemented" }),
+		purge: purgeViaBinding,
 		now: () => Date.now(),
 	},
 	routes,

@@ -1,6 +1,8 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { LINK_TOKEN_PATTERN } from "@kumodana/shared/ids";
+import type { PurgeResult } from "@kumodana/shared/api-types";
 import { applyCacheHeaders, commonHeaders, contentDisposition, uncachedHeaders } from "./headers.ts";
+import { purgeTags } from "./purge.ts";
 
 type DeliveryRow = {
 	id: string;
@@ -15,6 +17,12 @@ function notFound(): Response {
 	const headers = uncachedHeaders();
 	headers.set("Content-Type", "text/plain; charset=utf-8");
 	return new Response("Not Found", { status: 404, headers });
+}
+
+function redirectTo(location: string): Response {
+	const headers = uncachedHeaders();
+	headers.set("Location", location);
+	return new Response(null, { status: 301, headers });
 }
 
 function methodNotAllowed(): Response {
@@ -34,6 +42,8 @@ export default class Files extends WorkerEntrypoint<Env> {
 		const url = new URL(request.url);
 		const token = url.pathname.slice(1);
 		if (!LINK_TOKEN_PATTERN.test(token)) return notFound();
+		// Query strings would bypass the cache (it keys on them), so never serve content for them (FR-022).
+		if (url.search !== "") return redirectTo(`/${token}`);
 
 		// One lookup: an active link to a ready file (FR-012, FR-021).
 		const row = await this.env.DB.prepare(
@@ -53,6 +63,11 @@ export default class Files extends WorkerEntrypoint<Env> {
 		const object = await this.env.BUCKET.get(row.r2_key);
 		if (!object) return notFound();
 		return new Response(object.body, { status: 200, headers: deliveryHeaders(row, token) });
+	}
+
+	/** RPC for the admin Worker: purge this Worker's cache by tag (contracts/files-rpc.md). */
+	async purge(tags: string[]): Promise<PurgeResult> {
+		return purgeTags(this.ctx.cache, tags);
 	}
 }
 

@@ -128,18 +128,18 @@ description: "Task list for 001-share-shelf-mvp"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T048 [P] [US2] Purge RPC tests in `apps/files/test/purge.test.ts`: tags other than `l:<token>`/`f:<fileId>` → `invalid_tag`; more than 100 tags → `invalid_tag`; `ctx.cache` undefined → `cache_unavailable`; fake `ctx.cache.purge` success and failure mapped to `PurgeResult`
-- [ ] T049 [P] [US2] Redirect test in `apps/files/test/redirect.test.ts`: `/<token>?fbclid=x` → 301 with `Location: /<token>` and `Cache-Control: no-store`, without file content
-- [ ] T050 [P] [US2] Revoke and list tests in `apps/admin/test/links-revoke.test.ts`: revoke sets `revoked_at`; purge is called with `l:<token>`; purge failure → 200 with `purge.ok = false` and the revoke recorded; revoking again only retries the purge; `GET /api/links` filters by `fileId` and `includeRevoked`, newest first; unknown token → 404
-- [ ] T051 [P] [US2] CLI link tests in `apps/cli/test/link.test.ts`: token extraction from a URL, `ls --all`, `revoke` exits `1` with a retry hint and the 1-hour upper bound when purge fails
+- [X] T048 [P] [US2] Purge RPC tests in `apps/files/test/purge.test.ts`: tags other than `l:<token>`/`f:<fileId>` → `invalid_tag`; more than 100 tags → `invalid_tag`; `ctx.cache` undefined → `cache_unavailable`; fake `ctx.cache.purge` success and failure mapped to `PurgeResult`
+- [X] T049 [P] [US2] Redirect test in `apps/files/test/redirect.test.ts`: `/<token>?fbclid=x` → 301 with `Location: /<token>` and `Cache-Control: no-store`, without file content
+- [X] T050 [P] [US2] Revoke and list tests in `apps/admin/test/links-revoke.test.ts`: revoke sets `revoked_at`; purge is called with `l:<token>`; purge failure → 200 with `purge.ok = false` and the revoke recorded; revoking again only retries the purge; `GET /api/links` filters by `fileId` and `includeRevoked`, newest first; unknown token → 404
+- [X] T051 [P] [US2] CLI link tests in `apps/cli/test/link.test.ts`: token extraction from a URL, `ls --all`, `revoke` exits `1` with a retry hint and the 1-hour upper bound when purge fails
 
 ### Implementation for User Story 2
 
-- [ ] T052 [US2] Implement RPC `purge(tags)` in `apps/files/src/index.ts` per contracts/files-rpc.md（`this.ctx.cache.purge({ tags })`、例外を投げずに `PurgeResult` を返す）
-- [ ] T053 [US2] Implement the query-string redirect in `apps/files/src/index.ts`（正規のパスへ 301、`no-store`）
-- [ ] T054 [US2] Implement `apps/admin/src/purge.ts`: call `env.FILES.purge(tags)`; missing binding → `{ ok: false, error: "binding_unavailable" }`; catch exceptions; injectable for tests
-- [ ] T055 [US2] Implement `DELETE /api/links/:token` and `GET /api/links` in `apps/admin/src/routes/links.ts`（`app.ts` に登録、クエリは Zod で検証）with queries `revokeLink` and `listLinks` in `apps/admin/src/db/links.ts`
-- [ ] T056 [US2] Implement `kumo link ls [<id>] [--all]` and `kumo link revoke <token|url>` in `apps/cli/src/commands/link.ts`
+- [X] T052 [US2] Implement RPC `purge(tags)` in `apps/files/src/index.ts` per contracts/files-rpc.md（`this.ctx.cache.purge({ tags })`、例外を投げずに `PurgeResult` を返す）
+- [X] T053 [US2] Implement the query-string redirect in `apps/files/src/index.ts`（正規のパスへ 301、`no-store`）
+- [X] T054 [US2] Implement `apps/admin/src/purge.ts`: call `env.FILES.purge(tags)`; missing binding → `{ ok: false, error: "binding_unavailable" }`; catch exceptions; injectable for tests
+- [X] T055 [US2] Implement `DELETE /api/links/:token` and `GET /api/links` in `apps/admin/src/routes/links.ts`（`app.ts` に登録、クエリは Zod で検証）with queries `revokeLink` and `listLinks` in `apps/admin/src/db/links.ts`
+- [X] T056 [US2] Implement `kumo link ls [<id>] [--all]` and `kumo link revoke <token|url>` in `apps/cli/src/commands/link.ts`
 
 **Checkpoint**: US1 と US2 が独立して動く
 
