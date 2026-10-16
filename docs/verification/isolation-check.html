@@ -21,12 +21,14 @@
 </p>
 <p>
   他のリンクの読み取りを確かめるには、別のファイルのリンク URL を入れてから「再実行」を押す。<br>
-  <input id="other" placeholder="https://kumo.meshnode.workers.dev/（別のリンクのトークン）">
+  <input id="other" placeholder="https://kumo.&lt;subdomain&gt;.workers.dev/（別のリンクのトークン）">
   <button id="rerun" type="button">再実行</button>
 </p>
 <ol id="results"></ol>
 <script>
-  const ADMIN = "https://kumodana-admin.meshnode.workers.dev/api/usage";
+  // 配信用 (kumo.<subdomain>.workers.dev) と同じサブドメインにある管理用 Worker を狙う。
+  const SITE = location.hostname.replace(/^kumo\./, "");
+  const ADMIN = `https://kumodana-admin.${SITE}/api/usage`;
   const list = document.getElementById("results");
 
   function report(name, blocked, detail) {
@@ -49,7 +51,7 @@
     list.textContent = "";
     await check("Cookie の読み取り", async () => `document.cookie = "${document.cookie}"`);
     await check("Cookie の書き込み（親ドメインへ）", async () => {
-      document.cookie = "kumodana_test=1; Domain=meshnode.workers.dev; Path=/";
+      document.cookie = `kumodana_test=1; Domain=${SITE}; Path=/`;
       return "書き込めた";
     });
     await check("localStorage", async () => {

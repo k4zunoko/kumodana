@@ -3,7 +3,7 @@ import { ApiError } from "./errors.ts";
 
 /**
  * Rejects requests that a browser could send from another site (research R6).
- * admin and delivery live on the same site (meshnode.workers.dev), so SameSite cookies do not help.
+ * admin and delivery live on the same site (<subdomain>.workers.dev), so SameSite cookies do not help.
  */
 export function assertNotCrossSite(request: Request): void {
 	if (request.headers.get(HEADER_CLIENT) !== HEADER_CLIENT_VALUE) {

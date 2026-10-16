@@ -11,7 +11,7 @@ describe("cross-site request protection", () => {
 	});
 
 	it("rejects requests with an Origin header", async () => {
-		const res = await call(app, "GET", "/api/x", { headers: { Origin: "https://kumo.meshnode.workers.dev" } });
+		const res = await call(app, "GET", "/api/x", { headers: { Origin: "https://kumo.example.workers.dev" } });
 		expect(res.status).toBe(403);
 	});
 

@@ -44,8 +44,8 @@ afterEach(() => server.close());
 describe("tokenFromArgument", () => {
 	it("accepts a token or a link URL", () => {
 		expect(tokenFromArgument(TOKEN)).toBe(TOKEN);
-		expect(tokenFromArgument(`https://kumo.meshnode.workers.dev/${TOKEN}`)).toBe(TOKEN);
-		expect(tokenFromArgument(`https://kumo.meshnode.workers.dev/${TOKEN}?fbclid=1`)).toBe(TOKEN);
+		expect(tokenFromArgument(`https://kumo.example.workers.dev/${TOKEN}`)).toBe(TOKEN);
+		expect(tokenFromArgument(`https://kumo.example.workers.dev/${TOKEN}?fbclid=1`)).toBe(TOKEN);
 		expect(tokenFromArgument("nope")).toBeUndefined();
 	});
 });

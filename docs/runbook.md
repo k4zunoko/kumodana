@@ -3,8 +3,9 @@
 初期設定、デプロイ、日常の運用、緊急停止の手順をまとめる。コマンドはリポジトリのルートで実行する
 （`cf` はプロジェクトに入っている版を `npx cf` で使う）。
 
-- 管理用 Worker: `kumodana-admin`（`https://kumodana-admin.meshnode.workers.dev`、Access で保護）
-- 配信用 Worker: `kumo`（`https://kumo.meshnode.workers.dev/<token>`）
+- 管理用 Worker: `kumodana-admin`（`https://kumodana-admin.<subdomain>.workers.dev`、Access で保護）
+- 配信用 Worker: `kumo`（`https://kumo.<subdomain>.workers.dev/<token>`）
+- `<subdomain>` はアカウントの workers.dev サブドメイン。実際の値は `apps/admin/cloudflare.config.ts` の `FILES_BASE_URL` にある
 - D1: `kumodana`、R2: `kumodana`（R2 は公開しない）
 
 ## 0. 前提
@@ -121,7 +122,7 @@ npm install -g ./apps/cli    # kumo コマンドを登録（ビルド不要。No
 
 ```json
 {
-  "adminUrl": "https://kumodana-admin.meshnode.workers.dev",
+  "adminUrl": "https://kumodana-admin.<subdomain>.workers.dev",
   "clientId": "<client_id>",
   "clientSecret": "<client_secret>"
 }
@@ -186,7 +187,7 @@ npm run resume -w @kumodana/files   # 再開
 
 | 項目 | 結果 |
 |---|---|
-| SC-001 | 4.8MB の JPEG（位置情報付き）を `kumo put --link --tag` で置いてリンクを得るまで 4.5 秒（社内プロキシ経由） |
+| SC-001 | 4.8MB の JPEG（位置情報付き）を `kumo put --link --tag` で置いてリンクを得るまで 4.5 秒 |
 | SC-002 | 所有者がスマートフォンで、写真と隔離チェックのページが問題なく表示されることを確認 |
 | SC-003 | 取り消しの 3 秒後に 404（エッジのキャッシュ削除が成功）。同じファイルの別リンクは 200 のまま |
 | SC-005 | 配信された画像に GPS とカメラ情報がなく、Orientation は残っている。原本のハッシュと更新日時は不変 |

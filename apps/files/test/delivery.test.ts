@@ -2,7 +2,7 @@ import { exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetStorage, seed, TOKEN_A, TOKEN_B, TOKEN_C, TOKEN_D, TOKEN_UNKNOWN } from "./helpers.ts";
 
-const BASE = "https://kumo.meshnode.workers.dev";
+const BASE = "https://kumo.example.workers.dev";
 const CSP = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
 
 function get(path: string, method = "GET"): Promise<Response> {
