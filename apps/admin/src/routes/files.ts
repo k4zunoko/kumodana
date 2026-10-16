@@ -1,19 +1,33 @@
 import { HEADER_FILENAME, HEADER_SHA256 } from "@kumodana/shared/api-types";
 import { contentDisposition } from "@kumodana/shared/http";
-import { ALLOWED_CONTENT_TYPES, isAllowedContentType, MAX_FILE_BYTES, MAX_NAME_LENGTH } from "@kumodana/shared/limits";
+import {
+	ALLOWED_CONTENT_TYPES,
+	isAllowedContentType,
+	MAX_FILE_BYTES,
+	MAX_FILTER_TAGS,
+	MAX_NAME_LENGTH,
+} from "@kumodana/shared/limits";
 import { newFileId } from "@kumodana/shared/ids";
 import type { Hono } from "hono";
 import type { AppEnv } from "../app.ts";
 import {
+	beginDeletion,
+	deleteFileRows,
 	deleteRow,
 	findLiveBySha256,
+	getFileRow,
 	getFileSummary,
+	hasEverHadLinks,
 	insertPendingWithinQuota,
 	listBySha256,
+	listFiles,
 	markReady,
 } from "../db/files.ts";
+import { listLinks } from "../db/links.ts";
+import { toLink } from "../db/rows.ts";
 import { getUsage } from "../db/usage.ts";
 import { ApiError } from "../errors.ts";
+import { normalizeTags } from "./tags.ts";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 /** A pending upload younger than this is treated as still in progress (FR-008). */
@@ -36,6 +50,13 @@ function parseFilename(raw: string | undefined): string {
 		throw new ApiError(400, "invalid_request", `ファイル名は 1〜${MAX_NAME_LENGTH} 文字で、パスを含めないでください。`);
 	}
 	return name;
+}
+
+function parseCursor(value: string | undefined): { createdAt: number; id: string } | undefined {
+	if (value === undefined) return undefined;
+	const match = /^(\d+)_([0-9a-z]{1,32})$/.exec(value);
+	if (!match) throw new ApiError(400, "invalid_request", "cursor が不正です。");
+	return { createdAt: Number(match[1]), id: match[2] ?? "" };
 }
 
 function isChecksumError(error: unknown): boolean {
@@ -120,7 +141,44 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 			if (!SHA256_PATTERN.test(sha256)) throw new ApiError(400, "invalid_request");
 			return c.json({ files: await listBySha256(c.env.DB, sha256), nextCursor: null });
 		}
-		throw new ApiError(400, "invalid_request");
+
+		const rawTags = c.req.queries("tag") ?? [];
+		if (rawTags.length > MAX_FILTER_TAGS) {
+			throw new ApiError(400, "invalid_tag", `絞り込みに使えるタグは ${MAX_FILTER_TAGS} 個までです。`);
+		}
+		const tags = [...new Set(normalizeTags(rawTags))];
+		const limitText = c.req.query("limit") ?? "50";
+		const limit = Number(limitText);
+		if (!/^\d+$/.test(limitText) || limit < 1 || limit > 200) {
+			throw new ApiError(400, "invalid_request", "limit は 1〜200 にしてください。");
+		}
+		const cursor = parseCursor(c.req.query("cursor"));
+		const { files, next } = await listFiles(c.env.DB, { tags, limit, cursor });
+		return c.json({ files, nextCursor: next ? `${next.createdAt}_${next.id}` : null });
+	});
+
+	app.get("/api/files/:id", async (c) => {
+		const file = await getFileSummary(c.env.DB, c.req.param("id"));
+		if (!file) throw new ApiError(404, "not_found");
+		const rows = await listLinks(c.env.DB, { fileId: file.id, includeRevoked: true });
+		const baseUrl = String(c.env.FILES_BASE_URL);
+		return c.json({ file, links: rows.map((row) => toLink(row, baseUrl)) });
+	});
+
+	/**
+	 * Deletion (data-model.md): revoke links and mark `deleting` → purge if the file was ever linked →
+	 * delete the R2 object → delete the rows. A purge failure is reported but does not stop the deletion,
+	 * because cached copies expire within an hour regardless (FR-028).
+	 */
+	app.delete("/api/files/:id", async (c) => {
+		const deps = c.get("deps");
+		const row = await getFileRow(c.env.DB, c.req.param("id"));
+		if (!row || row.status === "pending") throw new ApiError(404, "not_found");
+		const revokedLinks = row.status === "ready" ? await beginDeletion(c.env.DB, row.id, deps.now()) : 0;
+		const purge = (await hasEverHadLinks(c.env.DB, row.id)) ? await deps.purge(c.env, [`f:${row.id}`]) : null;
+		await c.env.BUCKET.delete(row.r2_key);
+		await deleteFileRows(c.env.DB, row.id);
+		return c.json({ deleted: row.id, revokedLinks, purge });
 	});
 
 	app.get("/api/files/:id/content", async (c) => {

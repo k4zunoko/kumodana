@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
-import type { FileListResponse, FileSummary, Link, LinkResponse, UploadResponse } from "@kumodana/shared/api-types";
+import type {
+	FileListResponse,
+	FileSummary,
+	Link,
+	LinkResponse,
+	TagsResponse,
+	UploadResponse,
+} from "@kumodana/shared/api-types";
 import { HEADER_FILENAME, HEADER_SHA256 } from "@kumodana/shared/api-types";
 import { MAX_FILE_BYTES } from "@kumodana/shared/limits";
 import type { Command } from "commander";
@@ -11,9 +18,11 @@ import { endExiftool, stripMetadata } from "../exif.ts";
 import { formatBytes, printError, printResult } from "../output.ts";
 import type { Runtime } from "../runtime.ts";
 import { sniff } from "../sniff.ts";
+import { parseTagChanges } from "./tag.ts";
 import type { Register } from "./index.ts";
 
 export type PutOptions = {
+	tag?: string[];
 	link?: boolean;
 	label?: string;
 	keepExif?: boolean;
@@ -99,6 +108,11 @@ async function putOne(api: AdminApi, path: string, options: PutOptions): Promise
 		: await upload(api, data, sniffed.contentType, sha256, name);
 
 	const result: PutResult = { path, file, duplicate };
+	if (options.tag && options.tag.length > 0) {
+		const { add } = parseTagChanges(options.tag.map((t) => `+${t}`));
+		const tagged = await api.request<TagsResponse>("PATCH", `/api/files/${file.id}/tags`, { json: { add } });
+		result.file = { ...file, tags: tagged.tags };
+	}
 	if (options.link) {
 		const json = options.label ? { label: options.label } : {};
 		result.link = (await api.request<LinkResponse>("POST", `/api/files/${file.id}/links`, { json })).link;
@@ -116,6 +130,7 @@ function describe(result: PutResult): string[] {
 
 /** `kumo put`: see contracts/cli.md. */
 export async function put(runtime: Runtime, paths: string[], options: PutOptions): Promise<number> {
+	if (options.tag) parseTagChanges(options.tag.map((t) => `+${t}`)); // reject bad tags before uploading
 	const api = await runtime.api();
 	const results: PutResult[] = [];
 	try {
@@ -145,6 +160,7 @@ export const registerPut: Register = (program: Command, wrap) => {
 		.command("put")
 		.description("ファイルを置く（画像の EXIF は既定で削除する）")
 		.argument("<path...>", "置くファイル")
+		.option("--tag <tag>", "タグを付ける（繰り返し指定できる）", (value: string, previous: string[] = []) => [...previous, value])
 		.option("--link", "リンクも発行する")
 		.option("--label <text>", "リンクに付けるメモ")
 		.option("--keep-exif", "画像のメタデータを残す")

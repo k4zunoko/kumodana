@@ -182,20 +182,20 @@ description: "Task list for 001-share-shelf-mvp"
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T067 [P] [US4] Listing tests in `apps/admin/test/list.test.ts`: newest first, `ready` only, one tag, two tags（AND）, unknown tag → empty list, more than 10 tags → 400 `invalid_tag`, cursor pagination, `limit` 1〜200（既定 50）, every `FileSummary` field, `GET /api/files/:id` includes revoked links and returns 404 for `pending`/`deleting`
-- [ ] T068 [P] [US4] Tag tests in `apps/admin/test/tags.test.ts`: `PATCH` normalization and `invalid_tag`（`add` と `remove` の合計 1〜50 件）; `GET /api/tags` counts only `ready` files and orders by count desc then tag name
-- [ ] T069 [P] [US4] Deletion tests in `apps/admin/test/delete.test.ts`: active links revoked and file set to `deleting` in one batch; the file disappears from lists and delivery immediately; `f:<id>` purged only if the file ever had a link; the R2 object and rows are removed and usage decreases even when the purge fails（`purge.ok = false` を返す）; retrying a file left in `deleting` resumes from the purge; a `ready` file never lacks its R2 object at any step
-- [ ] T070 [P] [US4] CLI tests in `apps/cli/test/organize.test.ts`: `ls` rendering and repeated `--tag`, `tags` rendering, `+tag`/`-tag` parsing, `rm` continues after `purge.ok = false` and exits `1` with the 1-hour message, `put --tag` also applies to duplicates
+- [X] T067 [P] [US4] Listing tests in `apps/admin/test/list.test.ts`: newest first, `ready` only, one tag, two tags（AND）, unknown tag → empty list, more than 10 tags → 400 `invalid_tag`, cursor pagination, `limit` 1〜200（既定 50）, every `FileSummary` field, `GET /api/files/:id` includes revoked links and returns 404 for `pending`/`deleting`
+- [X] T068 [P] [US4] Tag tests in `apps/admin/test/tags.test.ts`: `PATCH` normalization and `invalid_tag`（`add` と `remove` の合計 1〜50 件）; `GET /api/tags` counts only `ready` files and orders by count desc then tag name
+- [X] T069 [P] [US4] Deletion tests in `apps/admin/test/delete.test.ts`: active links revoked and file set to `deleting` in one batch; the file disappears from lists and delivery immediately; `f:<id>` purged only if the file ever had a link; the R2 object and rows are removed and usage decreases even when the purge fails（`purge.ok = false` を返す）; retrying a file left in `deleting` resumes from the purge; a `ready` file never lacks its R2 object at any step
+- [X] T070 [P] [US4] CLI tests in `apps/cli/test/organize.test.ts`: `ls` rendering and repeated `--tag`, `tags` rendering, `+tag`/`-tag` parsing, `rm` continues after `purge.ok = false` and exits `1` with the 1-hour message, `put --tag` also applies to duplicates
 
 ### Implementation for User Story 4
 
-- [ ] T071 [US4] Implement `listFiles`（0〜10 個のタグの AND: `GROUP BY file_id HAVING COUNT(DISTINCT tag) = <指定数>`、`(created_at, id)` によるカーソル、`limit`）in `apps/admin/src/db/files.ts`, and `GET /api/files` with all filters plus `GET /api/files/:id` in `apps/admin/src/routes/files.ts`
-- [ ] T072 [US4] Implement `apps/admin/src/db/tags.ts`（付与、解除、件数付きの一覧）and `PATCH /api/files/:id/tags` and `GET /api/tags` in `apps/admin/src/routes/tags.ts`, registered in `apps/admin/src/app.ts`（本文は Zod で検証し、`@kumodana/shared` の names で正規化）
-- [ ] T073 [US4] Implement `DELETE /api/files/:id` in `apps/admin/src/routes/files.ts` following the deletion steps in data-model.md（D1 のバッチでリンクの取り消しと `deleting` への変更 → 必要ならキャッシュ削除 → 成否にかかわらず R2 → 行の削除。`deleting` のままのファイルへのやり直しは手順 2 から）, using `apps/admin/src/purge.ts`（depends on T054）
-- [ ] T074 [P] [US4] Implement `kumo ls [--tag <tag>]... [--limit]` in `apps/cli/src/commands/ls.ts`（`main.ts` に登録）
-- [ ] T075 [P] [US4] Implement `kumo tag <id> <+tag|-tag>...` in `apps/cli/src/commands/tag.ts` and `kumo tags` in `apps/cli/src/commands/tags.ts`（いずれも `main.ts` に登録）
-- [ ] T076 [US4] Implement `kumo rm <id...>` in `apps/cli/src/commands/rm.ts`（`main.ts` に登録。`purge.ok = false` は削除が完了したことと、配信側に最長 1 時間残りうることを表示して続行し、最後に終了コード `1`）
-- [ ] T077 [US4] Add `--tag` to `kumo put` in `apps/cli/src/commands/put.ts`（重複時も既存のファイルに付与）
+- [X] T071 [US4] Implement `listFiles`（0〜10 個のタグの AND: `GROUP BY file_id HAVING COUNT(DISTINCT tag) = <指定数>`、`(created_at, id)` によるカーソル、`limit`）in `apps/admin/src/db/files.ts`, and `GET /api/files` with all filters plus `GET /api/files/:id` in `apps/admin/src/routes/files.ts`
+- [X] T072 [US4] Implement `apps/admin/src/db/tags.ts`（付与、解除、件数付きの一覧）and `PATCH /api/files/:id/tags` and `GET /api/tags` in `apps/admin/src/routes/tags.ts`, registered in `apps/admin/src/app.ts`（本文は Zod で検証し、`@kumodana/shared` の names で正規化）
+- [X] T073 [US4] Implement `DELETE /api/files/:id` in `apps/admin/src/routes/files.ts` following the deletion steps in data-model.md（D1 のバッチでリンクの取り消しと `deleting` への変更 → 必要ならキャッシュ削除 → 成否にかかわらず R2 → 行の削除。`deleting` のままのファイルへのやり直しは手順 2 から）, using `apps/admin/src/purge.ts`（depends on T054）
+- [X] T074 [P] [US4] Implement `kumo ls [--tag <tag>]... [--limit]` in `apps/cli/src/commands/ls.ts`（`main.ts` に登録）
+- [X] T075 [P] [US4] Implement `kumo tag <id> <+tag|-tag>...` in `apps/cli/src/commands/tag.ts` and `kumo tags` in `apps/cli/src/commands/tags.ts`（いずれも `main.ts` に登録）
+- [X] T076 [US4] Implement `kumo rm <id...>` in `apps/cli/src/commands/rm.ts`（`main.ts` に登録。`purge.ok = false` は削除が完了したことと、配信側に最長 1 時間残りうることを表示して続行し、最後に終了コード `1`）
+- [X] T077 [US4] Add `--tag` to `kumo put` in `apps/cli/src/commands/put.ts`（重複時も既存のファイルに付与）
 
 **Checkpoint**: すべてのストーリーが独立して動く
 
