@@ -193,3 +193,125 @@ describe("kumo get", () => {
 		expect((await stat(join(dir, "写真.png"))).size).toBe(3);
 	});
 });
+
+describe("kumo put: Markdown documents and text (002)", () => {
+	const html = (file: StoredFile) => file.body.toString("utf8");
+
+	it("converts a Markdown document to HTML named <name>.html and keeps the original", async () => {
+		const path = join(dir, "note.md");
+		await writeFile(path, "# メモ\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [ ] todo\n");
+		const before = await stat(path);
+		const { runtime, captured } = testRuntime(server.url);
+		const code = await put(runtime, [path], { link: true });
+		expect(code).toBe(0);
+		const stored = files[0] as StoredFile;
+		expect(stored.name).toBe("note.md.html");
+		expect(stored.contentType).toBe("text/html; charset=utf-8");
+		expect(stored.sha256).toBe(createHash("sha256").update(stored.body).digest("hex"));
+		expect(html(stored)).toMatch(/^<!doctype html>\n/);
+		expect(html(stored)).toContain("<title>メモ</title>");
+		expect(html(stored)).toContain("<table>");
+		const out = allOutput(captured);
+		expect(out).toContain(`${stored.id}  note.md.html`);
+		expect(out).toContain("Markdown → HTML");
+		expect(out).toContain(`https://kumo.example/${"T".repeat(22)}`);
+		expect((await readFile(path)).toString()).toBe("# メモ\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [ ] todo\n");
+		expect((await stat(path)).mtimeMs).toBe(before.mtimeMs);
+	});
+
+	it("finds the same converted content again as a duplicate", async () => {
+		const path = join(dir, "same.md");
+		await writeFile(path, "# 同じ\n");
+		await put(testRuntime(server.url).runtime, [path], {});
+		requests = [];
+		const { runtime, captured } = testRuntime(server.url);
+		expect(await put(runtime, [path], {})).toBe(0);
+		expect(requests.some((r) => r.startsWith("PUT"))).toBe(false);
+		expect(allOutput(captured)).toContain("重複");
+	});
+
+	it("reports kind, warnings, and a summary in JSON", async () => {
+		const note = join(dir, "note.md");
+		await writeFile(note, "# A\n\n<b>raw</b>\n");
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, [note], {})).toBe(0);
+		const result = JSON.parse(captured.stdout.join("\n")) as {
+			results: { kind: string; warnings: string[] }[];
+			summary: { kinds: Record<string, number>; warnings: number };
+		};
+		expect(result.results[0]?.kind).toBe("markdown");
+		expect(result.results[0]?.warnings).toEqual([expect.stringContaining("3 行目")]);
+		expect(result.summary).toEqual({ kinds: { markdown: 1 }, warnings: 1 });
+		expect(captured.stderr).toEqual([]);
+	});
+
+	it("warns about a .txt file shown as Markdown and keeps going", async () => {
+		const path = join(dir, "memo.txt");
+		await writeFile(path, "買い物\n- 牛乳\n");
+		const { runtime, captured } = testRuntime(server.url);
+		expect(await put(runtime, [path], {})).toBe(0);
+		expect((files[0] as StoredFile).name).toBe("memo.txt.html");
+		expect(captured.stderr.join("\n")).toContain(`警告: ${path}: 拡張子は .txt ですが`);
+		expect(captured.stderr.join("\n")).toContain("--as text");
+	});
+
+	it("shows text as it is with --as text", async () => {
+		const log = join(dir, "app.log");
+		await writeFile(log, "12:00 [INFO] start\n12:01 [WARN] *x* <y>\n");
+		const page = join(dir, "page.html");
+		await writeFile(page, "<!doctype html><p>source</p>");
+		const { runtime, captured } = testRuntime(server.url);
+		expect(await put(runtime, [log, page], { as: "text" })).toBe(0);
+		const [logFile, pageFile] = files as [StoredFile, StoredFile];
+		expect(logFile.name).toBe("app.log.html");
+		expect(html(logFile)).toContain("<pre>\n12:00 [INFO] start\n12:01 [WARN] *x* &#60;y&#62;\n</pre>");
+		expect(pageFile.name).toBe("page.html.html");
+		expect(html(pageFile)).toContain("&#60;!doctype html&#62;&#60;p&#62;source");
+		expect(allOutput(captured)).toContain("テキスト → HTML");
+		expect(captured.stderr).toEqual([]);
+	});
+
+	it("treats a document that starts with <svg> as Markdown with --as markdown", async () => {
+		const path = join(dir, "readme.md");
+		await writeFile(path, "<svg></svg>\n\n# Title\n");
+		const { runtime } = testRuntime(server.url);
+		expect(await put(runtime, [path], { as: "markdown" })).toBe(0);
+		expect((files[0] as StoredFile).name).toBe("readme.md.html");
+		expect(html(files[0] as StoredFile)).toContain("<h1>Title</h1>");
+	});
+
+	it("refuses --as for images and unknown --as values", async () => {
+		const image = await fixture("gps.png");
+		const { runtime, captured } = testRuntime(server.url);
+		expect(await put(runtime, [image], { as: "text" })).toBe(1);
+		expect(files).toEqual([]);
+		expect(allOutput(captured)).toContain("not_text");
+
+		const { runtime: second, captured: secondOut } = testRuntime(server.url);
+		expect(await runCommand(second, () => put(second, [image], { as: "html" }))).toBe(2);
+		expect(allOutput(secondOut)).toContain("--as には markdown か text");
+	});
+
+	it("refuses UTF-16 and private keys, continues with the rest, and summarizes", async () => {
+		const utf16 = join(dir, "ps.md");
+		await writeFile(utf16, Buffer.from([0xff, 0xfe, 0x23, 0x00, 0x20, 0x00, 0x61, 0x00]));
+		const key = join(dir, "key.txt");
+		await writeFile(key, "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n");
+		const ok = join(dir, "ok.md");
+		await writeFile(ok, "# ok\n");
+		const page = join(dir, "page.html");
+		await writeFile(page, "<!doctype html><p>x</p>");
+		const memo = join(dir, "memo.txt");
+		await writeFile(memo, "memo\n");
+		const { runtime, captured } = testRuntime(server.url);
+		expect(await put(runtime, [utf16, key, ok, page, memo], {})).toBe(1);
+		expect(files.map((f) => f.name)).toEqual(["ok.md.html", "page.html", "memo.txt.html"]);
+		const out = allOutput(captured);
+		expect(out).toContain("UTF-16");
+		expect(out).toContain("unsupported_encoding");
+		expect(out).toContain("秘密鍵");
+		expect(out).toContain("private_key");
+		expect(out).toContain("形式: Markdown → HTML 2 件、HTML 1 件 / 警告: 1 件");
+		expect(out).toContain("失敗: 2 件");
+	});
+});
