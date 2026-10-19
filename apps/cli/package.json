@@ -15,8 +15,10 @@
   },
   "dependencies": {
     "@kumodana/shared": "0.0.0",
+    "@mdit/plugin-tasklist": "1.1.3",
     "commander": "15.0.0",
-    "exiftool-vendored": "39.0.1"
+    "exiftool-vendored": "39.0.1",
+    "markdown-it": "15.0.2"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
