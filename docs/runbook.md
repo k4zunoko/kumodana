@@ -172,6 +172,7 @@ npm run resume -w @kumodana/files   # 再開
 | 残骸の片付け | 管理用 Worker の定期実行（15 分ごと）が自動で行う |
 | 上限の変更 | `apps/admin/cloudflare.config.ts` の `STORAGE_LIMIT_BYTES` を変えてデプロイ |
 | サービストークンの更新 | 手順 3 の `refresh`。作り直した場合は config.json と `CLI_CLIENT_ID` を更新して再デプロイ |
+| Markdown の変換器の更新 | `markdown-it` と `@mdit/plugin-tasklist`（`apps/cli` の依存）のセキュリティ修正は、公開から 7 日経ってから `npm install -w kumodana-cli --save-exact markdown-it@<版>` で上げ、`npm test` を通して `npm install -g ./apps/cli` し直す。Worker のデプロイは要らない。置いた文書は自動では変わらない（置き直すと別のファイルになる） |
 
 ## 11. 検証の記録（research.md の確認事項、T030・T082）
 
