@@ -1,6 +1,6 @@
 # kumodana（雲棚）Constitution
 
-kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」である。画像と HTML を置き、
+kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」である。画像、HTML、Markdown 文書を置き、
 リンクで人に見せる・渡す。利用者は所有者 1 人、閲覧者はリンクを受け取った人に限る。
 
 ## Core Principles
@@ -50,6 +50,8 @@ kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」であ
   無効にする（MUST）。
 - 配信する HTML と SVG には、`allow-same-origin` を含まない CSP の `sandbox` を
   既定で付ける（MUST）。
+- Markdown 文書から変換した HTML には生の HTML を含めず、スクリプトを禁止する CSP を
+  文書自体に持たせる（MUST）。
 - 配信するすべてのファイルに `X-Content-Type-Options: nosniff`、
   `Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex` を付ける（MUST）。
 - 管理用と配信用は同一サイト（`meshnode.workers.dev`）にあり、SameSite Cookie では
@@ -90,8 +92,9 @@ kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」であ
 
 ### VII. 小さく保つ
 
-- 対象は画像と 1 枚で完結する HTML、操作は CLI だけとする。動画、zip で上げるサイト、
-  Web UI は、それぞれ仕様（spec）を作ってから追加する（MUST）。
+- 対象は画像、1 枚で完結する HTML、Markdown 文書とし、操作は CLI だけとする。Markdown 文書は
+  kumo CLI で 1 枚で完結する HTML に変換して置き、棚に置く形式は画像と HTML に限る（MUST）。
+  動画、zip で上げるサイト、Web UI は、それぞれ仕様（spec）を作ってから追加する（MUST）。
 - 整理はタグだけで行う（MUST）。フォルダ（階層）、アルバム、複数のファイルをまとめて
   公開するギャラリーは作らない（MUST NOT）。追加するには憲法の改正が必要である。
 - 依存ライブラリや外部サービスを追加するときは、プラットフォームの機能や標準 API では
@@ -111,14 +114,15 @@ kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」であ
   `cf` でできない操作（ライブログなど）に限り、`npx wrangler` を使う。
 - 実行環境は Node.js 22.18 以上と TypeScript とする。npm パッケージは、公開から
   7 日以上経った版を使う（npm の `min-release-age` 設定に従う）。
-- 受け付けるファイルは JPEG、PNG、GIF、WebP、AVIF、SVG、HTML で、1 ファイル 100MB 未満とする。
+- 受け付けるファイルは JPEG、PNG、GIF、WebP、AVIF、SVG、HTML、Markdown 文書で、1 ファイル 100MB 未満とする。
+  形式は中身で判定し、画像・SVG・HTML のいずれでもない UTF-8 のテキストを Markdown 文書とみなす。
 - Cloudflare 側の設定（Access、予算アラート、緊急停止）は、手順書またはスクリプトとして
   リポジトリに残す。
 - 基準とする技術選定は次のとおり。plan で変更してよいが、変更の理由を plan に記録する。
   - 管理用 Worker: Hono、Zod、jose
   - 配信用 Worker: フレームワークなし
   - D1: 素の SQL と手書きのマイグレーション
-  - CLI: Node.js、commander、exiftool-vendored
+  - CLI: Node.js、commander、exiftool-vendored、markdown-it
   - テスト: Vitest、`@cloudflare/vitest-plugin`
 
 ## 開発ワークフロー
@@ -142,4 +146,4 @@ kumodana は、Cloudflare 上に置く自分専用の「共有用の棚」であ
   `/speckit.analyze` の実行時、デプロイの前に行う。
 - 恒常的に必要な例外は、例外として扱い続けずに憲法を改正する。
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-15
+**Version**: 2.1.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-19
