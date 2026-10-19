@@ -4,7 +4,7 @@ import { EXIT_USAGE } from "./errors.ts";
 import { createRuntime, runCommand } from "./runtime.ts";
 
 const program = new Command("kumo")
-	.description("kumodana（雲棚）: 画像と HTML を置いてリンクで共有する、自分専用の棚")
+	.description("kumodana（雲棚）: 画像、HTML、Markdown 文書を置いてリンクで共有する、自分専用の棚")
 	.version("0.1.0")
 	.option("--json", "結果を JSON で出力する")
 	.showHelpAfterError()
