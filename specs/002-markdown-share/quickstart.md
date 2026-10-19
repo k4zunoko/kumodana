@@ -24,7 +24,7 @@ npm test
   4096 バイトより後ろにだけ不正なバイトがあっても見逃さない
 - 判定: 既存の画像・HEIC・動画・zip・SVG・HTML のテストが変更なしで通る。テキストは Markdown、`--as` が優先、XML・PDF・秘密鍵は拒否
 - 変換: GFM の記法、生の HTML とコメントの文字表示、危険なリンクの無効化、meta の CSP の位置、題名のエスケープ、同じ入力で同じバイト列、
-  病的な入力が 2 秒以内、1MB の文書が 2 秒以内
+  病的な入力と 1MB の文書で処理が暴走しない（上限は緩い。SC-006 は下の手順で測る）
 - `kumo put`: 名前 `note.md.html`、`Content-Type: text/html; charset=utf-8`、変換後の SHA-256、判定結果と警告、集計、原本が変わらない
 - `kumo preview`: 管理 API を呼ばない、`--output` で上書きしない
 
@@ -75,6 +75,19 @@ kumo put ./memo.txt ./data.json ./photo.jpg
   最後に形式ごとの件数と警告の件数が出る
 - 期待: Windows PowerShell 5.1 で `"# test" > ps.md` として作ったファイル（UTF-16LE）は、何も保存されず、UTF-8 で保存し直すよう案内される
 - 期待: `-----BEGIN PRIVATE KEY-----` の行を含むテキストは、`--as text` を付けても何も保存されない（本物の鍵は使わない）
+
+### SC-006: 1MB の文書の変換時間
+
+1MB 程度の Markdown 文書を用意し、負荷の少ない状態で次を実行する（PowerShell）。
+
+```powershell
+Measure-Command { kumo preview .ig.md --no-open }
+Measure-Command { kumo --version }
+```
+
+- 期待: 1 つ目と 2 つ目の差（変換にかかった時間の目安）が 2 秒以内
+- 記録（2026-10-19、開発 PC）: 1,000,114 バイトで変換は約 1.1 秒。`kumo preview` 全体は約 2.7〜3.4 秒、起動は約 1.3 秒
+  （[research.md](./research.md) M12）
 
 ### 後片付け
 

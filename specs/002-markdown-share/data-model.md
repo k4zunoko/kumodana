@@ -43,7 +43,11 @@
 
 - `html`: 変換後の HTML（UTF-8 のバイト列）
 - `title`: ページの題名
-- `warnings`: 生の HTML の行、表示されない画像、外部の画像のホストについての警告
+- `warnings`: 生の HTML の行、表示されない画像、外部の画像のホスト、使えない URL についての警告
+
+### 判定と変換の結果（`Prepared`、`apps/cli/src/prepare.ts`）
+
+- `kind`、`contentType`、`data`（送るバイト列。画像の EXIF は `kumo put` が後で取り除く）、`name`（棚に置く名前）、`warnings`
 
 ### 置いた結果（`PutResult`、`apps/cli/src/commands/put.ts`）
 

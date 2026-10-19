@@ -45,7 +45,7 @@ Worker のテストは変更しない
 - 画像・SVG・HTML の判定結果を変えない（FR-004）。既存の判定のテストはそのまま通す
 - 依存は公開から 7 日以上経った版に完全固定する（憲法の技術・運用上の制約）
 
-**Scale/Scope**: 利用者 1 人。CLI のソースに 4 ファイル（`text.ts`、`markdown.ts`、`warnings.ts`、`commands/preview.ts`）を加え、
+**Scale/Scope**: 利用者 1 人。CLI のソースに 5 ファイル（`text.ts`、`markdown.ts`、`warnings.ts`、`prepare.ts`、`commands/preview.ts`）を加え、
 `sniff.ts`、`commands/put.ts`、`commands/index.ts`、`main.ts` を変える
 
 ## Constitution Check
@@ -94,6 +94,7 @@ apps/cli/
 │   ├── sniff.ts             # 変更: 判定の順序、kind に markdown と text、--as、XML・PDF・秘密鍵の拒否
 │   ├── markdown.ts          # 新規: Markdown とテキストの HTML への変換、テンプレート、名前、警告
 │   ├── warnings.ts          # 新規: 拡張子と判定の食い違い、JSON の警告
+│   ├── prepare.ts           # 新規: 判定と変換をまとめる（put と preview が同じものを使う）
 │   ├── main.ts              # 変更: 説明文
 │   └── commands/
 │       ├── put.ts           # 変更: --as、変換、名前、判定結果と警告の表示、集計
@@ -113,7 +114,8 @@ docs/verification/markdown-check.md   # 新規: 手動確認用の文書（記�
 変更しないもの: `apps/admin/**`、`apps/files/**`、`apps/admin/migrations/**`、`packages/shared/**`。
 
 **Structure Decision**: 001 の構成のまま、CLI（`apps/cli`）の中だけで完結させる。判定（`sniff.ts`・`text.ts`）、変換（`markdown.ts`）、
-警告（`warnings.ts`）を分け、コマンド（`put.ts`・`preview.ts`）はそれらを組み合わせるだけにする。`sniff` はファイル名を受け取らず、
+警告（`warnings.ts`）を分け、`prepare.ts` がそれらをまとめる。コマンド（`put.ts`・`preview.ts`）は `prepare` を呼ぶだけなので、
+プレビューと置くものが必ず一致する（SC-005）。`sniff` はファイル名を受け取らず、
 拡張子を判定に使わないことを型で保つ。
 
 ## Complexity Tracking

@@ -130,6 +130,8 @@
 - **Rationale**: 対象の形式が少なく、判定は数十行で書ける（憲法 VII）。配信側はすべての応答に sandbox を
   付けるため、判定を誤っても危険にならない。
 - **Alternatives considered**: `file-type`（HTML と SVG を判定できない）。
+- **2026-10-19 注記**: [002 の research](../002-markdown-share/research.md) M5 で拡張した。画像・SVG・HTML の判定は
+  そのまま（先頭の読み飛ばしの範囲だけをファイル全体に広げた）で、それ以外の UTF-8 のテキストを Markdown 文書とする。
 
 ## R11. ID とトークン
 
