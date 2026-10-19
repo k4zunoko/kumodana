@@ -81,7 +81,7 @@ kumo put ./memo.txt ./data.json ./photo.jpg
 1MB 程度の Markdown 文書を用意し、負荷の少ない状態で次を実行する（PowerShell）。
 
 ```powershell
-Measure-Command { kumo preview .ig.md --no-open }
+Measure-Command { kumo preview .\big.md --no-open }
 Measure-Command { kumo --version }
 ```
 
