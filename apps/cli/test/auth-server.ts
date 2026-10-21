@@ -307,10 +307,21 @@ export async function mockAuthServer(options: AuthServerOptions = {}): Promise<A
 
 const tempHomes: string[] = [];
 
+type Remove = (dir: string, options: { recursive: true; force: true; maxRetries: number; retryDelay: number }) => Promise<void>;
+
+/**
+ * Removes test folders, retrying while Windows keeps a file busy (a virus scanner, for example). A folder that still
+ * cannot be removed is left behind: cleanup must never turn a passing test into a failure (PR #12 re-review).
+ */
+export async function removeTempDirs(dirs: string[], remove: Remove = rm): Promise<void> {
+	await Promise.all(
+		dirs.map((dir) => remove(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined)),
+	);
+}
+
 // Every test file that imports this module removes the folders its tests created (PR #12 review, minor 6).
 afterEach(async () => {
-	const dirs = tempHomes.splice(0);
-	await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
+	await removeTempDirs(tempHomes.splice(0));
 });
 
 /** A config folder of its own, so that tests never touch the owner's real config.json or login.json. */
