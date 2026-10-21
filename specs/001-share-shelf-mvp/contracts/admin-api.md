@@ -8,7 +8,9 @@
 ### 認証（2 段）
 
 1. **Access（Cloudflare の入口）**: CLI は `CF-Access-Client-Id` と `CF-Access-Client-Secret` を送る。Access は検証後に
-   `Cf-Access-Jwt-Assertion` を付けて Worker に渡す。
+   `Cf-Access-Jwt-Assertion` を付けて Worker に渡す。2026-10-21 注記: [003 の contracts](../../003-cli-login/contracts/admin-api.md) で、
+   `Authorization: Bearer`（Access の Managed OAuth のアクセストークン）の経路を加えた。Access は所有者の JWT（`email` 入り）を渡すので、
+   2 段目の検証は変わらない。
 2. **Worker**: `Cf-Access-Jwt-Assertion` を検証する。
    - 署名: チームドメインの `/cdn-cgi/access/certs` の公開鍵（RS256）
    - `iss` = チームドメイン、`aud` に AUD を含む、`exp`/`nbf` が有効

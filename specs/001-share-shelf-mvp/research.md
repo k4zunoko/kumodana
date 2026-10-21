@@ -41,6 +41,9 @@
   `ctx.access.getIdentity()` は人のログイン向けで、サービストークンの識別には JWT の `common_name` を使う。
 - **Alternatives considered**: ホスト名単位の Access アプリ（Worker 単位の方が漏れがない）、`ctx.access` だけで
   判定（サービストークンを識別できず、ローカルでのテストも難しい）。
+- **2026-10-21 注記**: [003 の research](../003-cli-login/research.md) L1・L10 で、CLI はブラウザでのログイン（Access の Managed OAuth）でも
+  所有者として通るようにした。Access がトークンを所有者の JWT（`email` 入り）に変えて渡すので、Worker の判定は変えていない。
+  サービストークンの経路も残している（残すかどうかは Issue #10 で決める）。
 - **注意**: Public Suffix List には `workers.dev` が登録されているため、`meshnode.workers.dev` 全体が 1 つの
   サイトになる。管理用と配信用は同一サイトで、SameSite Cookie による防御は効かない（R6 で対処）。
 
