@@ -78,6 +78,8 @@ kumo usage
   `adminUrl` と `client` は残る
 - 期待: ログアウトの前に `login.json` を別の場所に写しておき、ログアウトの後に写しを `login.json` に戻して `kumo usage` を実行すると、
   アクセストークンの期限前でも `login_required` になる（取り消しがその時点から効いている。写しは確認の後すぐに削除し、もう一度 `kumo logout` する）
+- 期待: 写しを戻したまま `kumo logout` を実行すると、`ログアウトしました: …（この PC の許可はすでに無効でした）` と出て終了コード 0 になる
+  （Access は取り消し済みのトークンに `400 invalid_grant` を返す。T035）
 - 期待: もう一度 `kumo logout` を実行すると `ログインしていません` で終了コード 0
 - 期待: ネットワークを切ってログアウトすると、`revoke_failed` で終了コード 1 になり、取り消す方法が表示される。`session` は消えている
   （この許可は `cf zero-trust access users revoke --email <owner>` などで取り消しておく）
