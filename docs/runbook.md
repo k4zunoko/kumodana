@@ -44,9 +44,12 @@ npx cf d1 migrations apply <DATABASE_ID> --dir migrations
 npx cf zero-trust access service-tokens create --name kumodana-cli --duration 8760h
 ```
 
-- 出力の `client_id` と `client_secret` を控える。**`client_secret` はこのときしか表示されない**ので、
-  パスワードマネージャーなどに保存する
-- 有効期限（作成から 1 年）をカレンダーなどに記録する。延長は `npx cf zero-trust access service-tokens refresh <TOKEN_ID>`
+- ふだんの CLI の利用は、ブラウザでのログイン（`kumo login`、§7）で行う。サービストークンは、ブラウザのない環境や、
+  Access の Managed OAuth が使えなくなったときの予備として残している（残すか廃止するかは Issue #10 で決める）
+- 出力の `client_id` は `.secrets.production.json` の `CLI_CLIENT_ID`（§4）に使う。**`client_secret` はこのときしか表示されない**。
+  予備として使う環境の環境変数か `config.json`（§7）にだけ書き、ほかに控えは取らない。失ったときは §7 の `rotate` で再発行する
+- 有効期限（作成から 1 年）をカレンダーなどに記録する。延長（シークレットは変わらない）は
+  `npx cf zero-trust access service-tokens refresh <TOKEN_ID>`
 
 ## 4. シークレットファイル
 
@@ -115,10 +118,59 @@ Windows の Git Bash では `--body "$(cat ...)"` が JSON として解釈され
 
 ```sh
 npm install -g ./apps/cli    # kumo コマンドを登録（ビルド不要。Node.js の型除去で直接動く）
+kumo login https://kumodana-admin.<subdomain>.workers.dev
+kumo usage                   # 使用量が表示されれば設定は完了
 ```
 
-`%APPDATA%\kumodana\config.json`（Windows）に書く。環境変数 `KUMODANA_ADMIN_URL`・`KUMODANA_CLIENT_ID`・
-`KUMODANA_CLIENT_SECRET` があればそちらが優先される。
+- `kumo login` は既定のブラウザで Access のログイン画面を開く。所有者のアカウント（§6 の `owner` ポリシー）でログインすると、
+  CLI がトークンを受け取って `login.json` に保存し、使用量を表示する。`config.json` を手で書く必要はない
+- ブラウザが開かないときは、表示された URL を**同じ PC のブラウザ**で開く（ログインの結果は、この PC の `127.0.0.1` で受け取る）。
+  `--no-open` を付けると、開かずに URL だけを表示して待つ。5 分で時間切れになる
+- 2 回目からは URL を省略できる（`KUMODANA_ADMIN_URL`、前回ログインした URL、`config.json` の `adminUrl` の順に使う）。
+  ログインし直すと、この PC の前の許可は取り消される。この PC の登録（クライアント）は使い回す
+- 許可の期間（Access の Managed OAuth の設定。値と設定の手順は §6）のあいだは、ブラウザを開かずに使える。
+  アクセストークンは管理操作のときに自動で更新される
+- `kumo login --status` で、管理操作に使われる資格情報（ログイン、サービストークン）と、ログインした日時、アクセストークンの期限を
+  確かめられる（通信しない）。実際に使えるかは `kumo usage` で確かめる
+- `login.json` は `config.json` と同じフォルダー（Windows では `%APPDATA%\kumodana\login.json`、それ以外では
+  `$XDG_CONFIG_HOME/kumodana/login.json`）にある。平文で、Windows ではユーザーのプロファイルの権限で、それ以外では 600 で守る。
+  CLI は `config.json` を書き換えない
+
+### ログインし直すとき
+
+- 管理操作が「`kumo login` を実行してください」（`login_required`）で失敗したら、`kumo login` を実行する。許可の期間が過ぎたか、
+  許可が取り消された
+- ブラウザにクライアント（client）のエラーが表示され、CLI が時間切れ（`login_timeout`）になったときは、この PC の登録が使えなくなっている。
+  `login.json` を削除してから `kumo login` を実行する
+- ログインし直した直後の確かめが `login_required` で失敗したときは、`kumo logout` の後に `kumo login` を実行する
+  （前の許可の取り消しが、新しい許可にも効いた場合）
+
+### PC を使わなくなるとき、PC をなくしたとき
+
+- 使わなくなる PC では `kumo logout` を実行する。この PC の許可を取り消し、`login.json` からトークンを消す（URL と登録は残る）。
+  取り消しはすぐ効く。通信できずに取り消せなかったとき（`revoke_failed`）は、トークンは消えるが許可は残るので、下の方法で取り消す
+- PC をなくした、`login.json` が漏れたかもしれないときは、別の PC から次のどちらかで取り消す。どちらもサービストークンには影響しない。
+  反映には 1 分ほどかかる
+
+  ```sh
+  npx cf zero-trust access applications list                    # kumodana-admin の <app-id> を確認
+  npx cf zero-trust access applications revoke-tokens <app-id>   # このアプリのすべての許可（ほかの PC の分も）を消す
+  npx cf zero-trust access users revoke --email <owner>          # 所有者のすべてのセッション（ほかのアプリやブラウザの分も）を消す
+  ```
+
+  ほかの PC では、次の管理操作が `login_required` になるので、`kumo login` し直す。ダッシュボードには、Worker 単位のアプリの
+  「Revoke existing tokens」が見当たらない（2026-10-20 時点）ため、取り消しは上のコマンドで行う
+
+### サービストークンで使う（予備）
+
+ブラウザのない環境や、Managed OAuth が使えなくなったときは、§3 のサービストークンで使う。管理操作に使う資格情報は、次の順に選ばれる。
+
+1. 環境変数 `KUMODANA_CLIENT_ID`・`KUMODANA_CLIENT_SECRET`（どちらか一方でもあれば、ログインより優先される）
+2. ログイン（`login.json`）
+3. `config.json` の `clientId`・`clientSecret`
+
+環境変数（`KUMODANA_ADMIN_URL`・`KUMODANA_CLIENT_ID`・`KUMODANA_CLIENT_SECRET`）か、`%APPDATA%\kumodana\config.json`（Windows）に書く。
+環境変数と `config.json` は項目ごとに組み合わせられ、環境変数が優先される。
 
 ```json
 {
@@ -128,19 +180,22 @@ npm install -g ./apps/cli    # kumo コマンドを登録（ビルド不要。No
 }
 ```
 
-`kumo usage` が使用量を表示すれば設定は完了。
+- ログインしている間は、`config.json` の `clientId`・`clientSecret` は使われない。ログインを使う PC では削除してよい
+- ログインを使うときに `KUMODANA_ADMIN_URL` を設定しておく場合は、ログインした URL と同じにする。違うと、トークンを送らずに
+  `admin_url_mismatch` で止まる
 
 ### シークレットの保管と再発行
 
-`clientSecret` は発行時に一度しか表示されず、このファイルにしか保存していない（控えは取らない方針）。
-ファイルを失ったとき、漏れたとき、期限（2027-10-16）が近いときは、同じトークンのシークレットを再発行する。
+`clientSecret` は発行時に一度しか表示されない。予備として使う環境の環境変数か `config.json` にだけ置き、ほかに控えは取らない（§3）。
+置いたファイルを失ったとき、漏れたとき、期限（2027-10-16）が近いときは、同じトークンのシークレットを再発行する。
 
 ```sh
 npx cf zero-trust access service-tokens rotate <service_token_id>   # kumodana-cli の ID は cf zero-trust access service-tokens list で確認
 ```
 
-`clientId` は変わらないため、Worker の再デプロイは不要。新しいシークレットで `config.json` の `clientSecret` を
-書き換え、`kumo usage` で確認する。古いシークレットは使えなくなる。
+`clientId` は変わらないため、Worker の再デプロイは不要。新しいシークレットで、使う環境の `clientSecret`（または
+`KUMODANA_CLIENT_SECRET`）を書き換え、`kumo usage` で確認する。古いシークレットは使えなくなる。期限を延ばすだけなら、
+シークレットが変わらない §3 の `refresh` を使う。
 
 ## 8. 予算アラートと使用量の通知（憲法 V、FR-038）
 
@@ -171,7 +226,10 @@ npm run resume -w @kumodana/files   # 再開
 | 使用量の確認 | `kumo usage`。R2 側の実測は `npx cf r2 buckets metrics list` |
 | 残骸の片付け | 管理用 Worker の定期実行（15 分ごと）が自動で行う |
 | 上限の変更 | `apps/admin/cloudflare.config.ts` の `STORAGE_LIMIT_BYTES` を変えてデプロイ |
-| サービストークンの更新 | 手順 3 の `refresh`。作り直した場合は config.json と `CLI_CLIENT_ID` を更新して再デプロイ |
+| ログインの確認 | `kumo login --status`（使われる資格情報とログインの状態。通信しない）。使えるかは `kumo usage` |
+| ログインし直す | `kumo login`（許可の期間が過ぎたとき、取り消されたとき。§7） |
+| PC の許可を手放す | その PC で `kumo logout`。PC をなくしたときは §7 の `revoke-tokens` か `users revoke` |
+| サービストークンの更新 | 期限の延長は §3 の `refresh`（シークレットは変わらない）。シークレットの再発行は §7 の `rotate`。トークンを作り直した場合は、使う環境の設定と `CLI_CLIENT_ID` を更新して再デプロイ |
 | Markdown の変換器の更新 | `markdown-it` と `@mdit/plugin-tasklist`（`apps/cli` の依存）のセキュリティ修正は、公開から 7 日経ってから `npm install -w kumodana-cli --save-exact markdown-it@<版>` で上げ、`npm test` を通して `npm install -g ./apps/cli` し直す。Worker のデプロイは要らない。置いた文書は自動では変わらない（置き直すと別のファイルになる） |
 
 ## 11. 検証の記録（research.md の確認事項、T030・T082）

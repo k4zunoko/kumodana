@@ -10,8 +10,8 @@ Cloudflare 上に置く、自分専用の「共有用の棚」。画像、1 枚�
 - 保存量は 8GB まで（超えると理由付きで拒否）。Workers は無料プランで運用する
 - 整理はタグだけ（複数タグでの絞り込みと、件数付きのタグ一覧）
 
-方針は [憲法](.specify/memory/constitution.md)、仕様と設計は [specs/001-share-shelf-mvp](specs/001-share-shelf-mvp/) と
-[specs/002-markdown-share](specs/002-markdown-share/) にある。
+方針は [憲法](.specify/memory/constitution.md)、仕様と設計は [specs/001-share-shelf-mvp](specs/001-share-shelf-mvp/)、
+[specs/002-markdown-share](specs/002-markdown-share/)、[specs/003-cli-login](specs/003-cli-login/) にある。
 
 ## 構成
 
@@ -35,7 +35,18 @@ Node.js 22.18 以上が必要。依存は公開から 7 日以上経った版に
 
 ## 使い方（kumo CLI）
 
-初期設定は [docs/runbook.md](docs/runbook.md) を参照。
+Cloudflare 側の初期設定は [docs/runbook.md](docs/runbook.md) を参照。CLI は、入れたらブラウザでログインするだけで使える
+（runbook §7）。
+
+```sh
+npm install -g ./apps/cli                # kumo コマンドを登録
+kumo login https://kumodana-admin.<subdomain>.workers.dev   # ブラウザで所有者としてログイン（2 回目からは URL を省略できる）
+kumo login --status                      # 使われる資格情報とログインの状態（通信しない）
+kumo logout                              # この PC の許可を取り消し、保存したトークンを消す
+```
+
+ログインは Access の許可の期間のあいだ続き、アクセストークンは自動で更新される。期限が切れたら、案内に従って `kumo login` し直す。
+ブラウザのない環境では、CLI 用サービストークン（環境変数か `config.json`）でも使える（runbook §7）。
 
 ```sh
 kumo put photo.jpg --tag 旅行 --link     # 置いてリンクを発行
@@ -54,7 +65,8 @@ kumo usage                               # 使用量
 ```
 
 `--json` を付けると結果を JSON で出力する。検証手順は
-[quickstart.md](specs/001-share-shelf-mvp/quickstart.md) と [002 の quickstart.md](specs/002-markdown-share/quickstart.md) を参照。
+[quickstart.md](specs/001-share-shelf-mvp/quickstart.md)、[002 の quickstart.md](specs/002-markdown-share/quickstart.md)、
+[003 の quickstart.md](specs/003-cli-login/quickstart.md) を参照。
 
 ## Markdown 文書
 
