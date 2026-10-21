@@ -145,7 +145,21 @@ export class LoginCredentials implements Credentials {
 	}
 
 	async headers(): Promise<Record<string, string>> {
-		if (this.#expiresSoon(this.#record.session)) await this.refresh();
+		const session = this.#record.session;
+		if (this.#expiresSoon(session)) {
+			try {
+				await this.refresh();
+			} catch (error) {
+				// The refresh ahead of expiry is only a head start. If the access token has not expired yet and the failure
+				// is temporary, warn and send it; a 401 still triggers the strict refresh in AdminApi (PR #12 review).
+				const temporary = error instanceof CliError && TEMPORARY.has(error.code);
+				if (!temporary || Date.parse(session.accessTokenExpiresAt) <= this.#ctx.now().getTime()) throw error;
+				printWarning(
+					this.#out,
+					`アクセストークンを先に更新できませんでした（${reasonOf(error)}）。期限までは今のトークンで続けます。`,
+				);
+			}
+		}
 		return { Authorization: `Bearer ${this.#record.session.accessToken}` };
 	}
 
