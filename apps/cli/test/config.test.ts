@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { configFilePath, loadConfig } from "../src/config.ts";
+import { configFilePath, loadConfig, loginFilePath } from "../src/config.ts";
 import { CliError } from "../src/errors.ts";
 
 async function tempConfigDir(content?: unknown): Promise<string> {
@@ -20,6 +20,13 @@ describe("config", () => {
 			join(String.raw`C:\Users\me\AppData\Roaming`, "kumodana", "config.json"),
 		);
 		expect(configFilePath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe(join("/xdg", "kumodana", "config.json"));
+	});
+
+	it("keeps login.json next to config.json (specs/003-cli-login research L9)", () => {
+		expect(loginFilePath({ APPDATA: String.raw`C:\Users\me\AppData\Roaming` }, "win32")).toBe(
+			join(String.raw`C:\Users\me\AppData\Roaming`, "kumodana", "login.json"),
+		);
+		expect(loginFilePath({ XDG_CONFIG_HOME: "/xdg" }, "linux")).toBe(join("/xdg", "kumodana", "login.json"));
 	});
 
 	it("reads the file and lets environment variables override it", async () => {

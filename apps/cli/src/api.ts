@@ -1,5 +1,6 @@
 import { type ErrorBody, HEADER_CLIENT, HEADER_CLIENT_VALUE } from "@kumodana/shared/api-types";
 import type { CliConfig } from "./config.ts";
+import { type Credentials, loginRequired, ServiceTokenCredentials } from "./credentials.ts";
 import { CliError } from "./errors.ts";
 
 /** An error returned by the admin API (or by Cloudflare in front of it). */
@@ -28,18 +29,34 @@ const AUTH_HINT =
 	"KUMODANA_CLIENT_ID と KUMODANA_CLIENT_SECRET（設定ファイルでは clientId と clientSecret）が正しいか、" +
 	"サービストークンの期限が切れていないか確認してください。";
 
-/** Client for the admin API. Adds the Access service-token headers and the client header. */
+const LOGIN_ACCOUNT_HINT =
+	"ログインしたアカウントが所有者のもの（管理用 Worker の OWNER_EMAIL）か確かめてください。";
+
+const LOGIN_ACCESS_HINT =
+	"ログインしたアカウントが所有者のものか、Access の owner ポリシーを確かめてください。";
+
+export type AuthKind = Credentials["kind"];
+
+/**
+ * Client for the admin API. Adds the credentials of the chosen method and the client header. With the login
+ * method, a 401 triggers one refresh and one retry of the same request (specs/003-cli-login research L8).
+ */
 export class AdminApi {
-	readonly config: CliConfig;
+	readonly adminUrl: string;
+	readonly credentials: Credentials;
 	readonly fetchImpl: typeof fetch;
 
-	constructor(config: CliConfig, fetchImpl: typeof fetch = fetch) {
-		this.config = config;
+	constructor(
+		target: CliConfig | { adminUrl: string; credentials: Credentials },
+		fetchImpl: typeof fetch = (input, init) => fetch(input, init),
+	) {
+		this.adminUrl = target.adminUrl;
+		this.credentials = "credentials" in target ? target.credentials : new ServiceTokenCredentials(target);
 		this.fetchImpl = fetchImpl;
 	}
 
 	url(path: string, query?: RequestOptions["query"]): string {
-		const url = new URL(`${this.config.adminUrl}${path}`);
+		const url = new URL(`${this.adminUrl}${path}`);
 		for (const [key, value] of Object.entries(query ?? {})) {
 			if (value === undefined) continue;
 			for (const v of Array.isArray(value) ? value : [value]) url.searchParams.append(key, v);
@@ -49,26 +66,43 @@ export class AdminApi {
 
 	/** Sends a request and returns the raw response for 2xx; throws ApiError otherwise. */
 	async raw(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
-		const headers = new Headers(options.headers);
-		headers.set("CF-Access-Client-Id", this.config.clientId);
-		headers.set("CF-Access-Client-Secret", this.config.clientSecret);
-		headers.set(HEADER_CLIENT, HEADER_CLIENT_VALUE);
 		let body: BodyInit | undefined;
+		let contentType: string | undefined;
 		if (options.json !== undefined) {
-			headers.set("Content-Type", "application/json");
+			contentType = "application/json";
 			body = JSON.stringify(options.json);
 		} else if (options.body) {
 			body = options.body;
 		}
+		const url = this.url(path, options.query);
 
-		let response: Response;
-		try {
-			response = await this.fetchImpl(this.url(path, options.query), { method, headers, body, redirect: "manual" });
-		} catch (error) {
-			throw networkError(error);
-		}
+		const send = async (): Promise<Response> => {
+			const headers = new Headers(options.headers);
+			for (const [name, value] of Object.entries(await this.credentials.headers())) headers.set(name, value);
+			headers.set(HEADER_CLIENT, HEADER_CLIENT_VALUE);
+			if (contentType) headers.set("Content-Type", contentType);
+			try {
+				return await this.fetchImpl(url, { method, headers, body, redirect: "manual" });
+			} catch (error) {
+				throw networkError(error);
+			}
+		};
+
+		let response = await send();
 		if (response.ok) return response;
-		throw await toApiError(response);
+
+		const resendable = !(body instanceof ReadableStream);
+		if (this.credentials.kind === "login" && response.status === 401 && this.credentials.refresh && resendable) {
+			await response.body?.cancel();
+			await this.credentials.refresh();
+			response = await send();
+			if (response.ok) return response;
+			if (response.status === 401) {
+				await response.body?.cancel();
+				throw loginRequired();
+			}
+		}
+		throw await toApiError(response, this.credentials.kind);
 	}
 
 	async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
@@ -88,10 +122,16 @@ function networkError(error: unknown): CliError {
 }
 
 /** Maps API and Cloudflare errors to messages that say what to check. */
-export async function toApiError(response: Response): Promise<ApiError> {
+export async function toApiError(response: Response, kind: AuthKind = "service_token"): Promise<ApiError> {
 	const status = response.status;
+	const login = kind === "login";
 	if (status >= 300 && status < 400) {
 		const location = response.headers.get("Location") ?? "";
+		if (location.includes("cloudflareaccess.com") && login) {
+			await response.body?.cancel();
+			const required = loginRequired();
+			return new ApiError(status, required.code, required.message, { hint: required.hint });
+		}
 		if (location.includes("cloudflareaccess.com")) {
 			return new ApiError(status, "access_login_required", "Cloudflare Access のログイン画面に転送されました。", {
 				hint: `サービストークンが受け付けられていません。${AUTH_HINT} Access のポリシーに Service Auth があるかも確認してください。`,
@@ -112,17 +152,27 @@ export async function toApiError(response: Response): Promise<ApiError> {
 
 	if (body?.error?.code) {
 		const { code, message, details } = body.error;
+		if (login && status === 401) {
+			const required = loginRequired();
+			return new ApiError(status, required.code, required.message, { hint: required.hint, details });
+		}
 		let hint: string | undefined;
 		if (code === "unauthenticated") hint = AUTH_HINT;
 		if (code === "forbidden") {
-			hint = "このサービストークンは許可されていません。管理用 Worker の CLI_CLIENT_ID と Access のポリシーを確認してください。";
+			hint = login
+				? LOGIN_ACCOUNT_HINT
+				: "このサービストークンは許可されていません。管理用 Worker の CLI_CLIENT_ID と Access のポリシーを確認してください。";
 		}
 		return new ApiError(status, code, message, { hint, details });
 	}
 
+	if (login && status === 401) {
+		const required = loginRequired();
+		return new ApiError(status, required.code, required.message, { hint: required.hint });
+	}
 	if (status === 401 || status === 403) {
 		return new ApiError(status, "access_denied", `Cloudflare Access に拒否されました（HTTP ${status}）。`, {
-			hint: AUTH_HINT,
+			hint: login ? LOGIN_ACCESS_HINT : AUTH_HINT,
 		});
 	}
 	return new ApiError(status, "http_error", `管理 API がエラーを返しました（HTTP ${status}）。`, {
