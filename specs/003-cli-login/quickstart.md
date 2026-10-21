@@ -88,6 +88,8 @@ kumo usage
 - 期待: `kumo login --status` が、方法・URL・ログインした日時・アクセストークンの期限を表示する。ネットワークを切っても同じ結果になる
 - 期待: `$env:KUMODANA_CLIENT_ID = "x"` を設定すると、方法が `サービストークン（環境変数）` になり、足りない項目（`KUMODANA_CLIENT_SECRET`、
   `KUMODANA_ADMIN_URL`）が知らされる。終了コードは 0（確認の後に `Remove-Item Env:KUMODANA_CLIENT_ID`）
+- 期待: 壊れた `config.json`（中身が `{ broken` など）を置いても、`kumo login --status` は「config.json を読み込めません」を知らせて
+  終了コード 0 で終わる（確認の後にその `config.json` を消す）
 
 ### 既存の経路（SC-007）
 
