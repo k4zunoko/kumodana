@@ -417,7 +417,7 @@ describe("using the login for management operations (#7)", () => {
 });
 
 describe("kumo login --status (#6, FR-020)", () => {
-	async function status(dir: string, env: Record<string, string> = {}, json = false) {
+	async function status(dir: string, env: Record<string, string> = {}, json = false, loginFs?: LoginFs) {
 		let calls = 0;
 		const { runtime, captured } = loginRuntime(undefined, dir, {
 			json,
@@ -427,6 +427,7 @@ describe("kumo login --status (#6, FR-020)", () => {
 					calls++;
 					throw new Error("no network in --status");
 				},
+				...(loginFs ? { loginFs } : {}),
 			},
 		});
 		const code = await runCommand(runtime, () => login(runtime, undefined, { status: true }));
@@ -504,6 +505,46 @@ describe("kumo login --status (#6, FR-020)", () => {
 		const text = captured.stdout.join("\n");
 		expect(text).toContain("admin_url_mismatch");
 		expect(text).toContain("config.json の adminUrl（https://old.example.invalid）");
+	});
+
+	it.each([
+		["no other credentials", {}, "none"],
+		["an environment service token", { KUMODANA_CLIENT_ID: "x" }, "env_service_token"],
+	])("notes a broken config.json and still exits with 0, with %s (PR #12 review)", async (_name, env, method) => {
+		const dir = await tempConfigHome();
+		await mkdir(join(dir, "kumodana"), { recursive: true });
+		await writeFile(paths(dir).config, "{ broken");
+		const { code, captured } = await status(dir, env, true);
+		expect(code).toBe(0);
+		const result = JSON.parse(captured.stdout.join("\n")) as { method: string; notes: string[] };
+		expect(result.method).toBe(method);
+		expect(result.notes.join("\n")).toContain("config.json を読み込めません");
+		expect(captured.stderr).toEqual([]);
+	});
+
+	it("notes a broken config.json next to a login too", async () => {
+		const dir = await tempConfigHome();
+		await writeLogin(paths(dir).login, sampleRecord("http://127.0.0.1:1"));
+		await writeFile(paths(dir).config, "{ broken");
+		const { code, captured } = await status(dir);
+		expect(code).toBe(0);
+		const text = captured.stdout.join("\n");
+		expect(text).toContain("方法: ログイン（login.json）");
+		expect(text).toContain("config.json を読み込めません");
+	});
+
+	it("ends with login_read_failed (exit code 1) when login.json stays unreadable", async () => {
+		const dir = await tempConfigHome();
+		const busy: LoginFs = {
+			readFile: async () => Promise.reject(Object.assign(new Error("EBUSY"), { code: "EBUSY" })),
+			writeFile: (p, d, o) => fs.writeFile(p, d, o),
+			rename: (a, b) => fs.rename(a, b),
+			unlink: (p) => fs.unlink(p),
+			mkdir: (p, o) => fs.mkdir(p, o),
+		};
+		const { code, captured } = await status(dir, {}, false, busy);
+		expect(code).toBe(1);
+		expect(captured.stderr.join("\n")).toContain("（login_read_failed）");
 	});
 
 	it("fails with login_invalid only for a broken login.json", async () => {

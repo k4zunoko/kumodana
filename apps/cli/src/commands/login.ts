@@ -295,10 +295,21 @@ function warnAboutOtherCredentials(runtime: Runtime, adminUrl: string, file: Rec
 /** `kumo login --status`: which credentials the CLI uses, without any network access (FR-020). */
 export async function status(runtime: Runtime): Promise<number> {
 	const { ctx, out } = runtime;
-	const resolved = await resolveCredentials(ctx, { readLogin: true });
-	const file = await readConfigQuietly(runtime);
+	// A malformed config.json is a note here, not an error: --status exists to find such problems (PR #12 review).
+	const resolved = await resolveCredentials(ctx, { readLogin: true, tolerateConfigErrors: true });
+	let configInvalid = resolved.configInvalid === true;
+	const file = await readConfigFile(ctx.env, ctx.platform).catch(() => {
+		configInvalid = true;
+		return {} as Record<string, unknown>;
+	});
 	const record = resolved.login;
 	const notes: string[] = [];
+	if (configInvalid) {
+		notes.push(
+			`config.json を読み込めません（JSON の形式が正しいか確かめてください）: ${resolved.configPath}。` +
+				"これを読む管理操作は config_invalid で失敗します。",
+		);
+	}
 
 	let adminUrl: string | null = null;
 	if (resolved.method === "login" && record) {
