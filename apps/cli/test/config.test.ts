@@ -1,12 +1,18 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { configFilePath, loadConfig, loginFilePath } from "../src/config.ts";
 import { CliError } from "../src/errors.ts";
 
+const created: string[] = [];
+afterEach(async () => {
+	await Promise.all(created.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
 async function tempConfigDir(content?: unknown): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "kumo-config-"));
+	created.push(dir);
 	if (content !== undefined) {
 		await mkdir(join(dir, "kumodana"), { recursive: true });
 		await writeFile(join(dir, "kumodana", "config.json"), JSON.stringify(content));

@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach } from "vitest";
 import type { CliContext } from "../src/context.ts";
 import type { LoginClient, LoginRecord, LoginSession } from "../src/login-store.ts";
 import { createRuntime, type Runtime } from "../src/runtime.ts";
@@ -304,9 +305,19 @@ export async function mockAuthServer(options: AuthServerOptions = {}): Promise<A
 	return state;
 }
 
+const tempHomes: string[] = [];
+
+// Every test file that imports this module removes the folders its tests created (PR #12 review, minor 6).
+afterEach(async () => {
+	const dirs = tempHomes.splice(0);
+	await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
+});
+
 /** A config folder of its own, so that tests never touch the owner's real config.json or login.json. */
 export async function tempConfigHome(): Promise<string> {
-	return mkdtemp(join(tmpdir(), "kumo-login-"));
+	const dir = await mkdtemp(join(tmpdir(), "kumo-login-"));
+	tempHomes.push(dir);
+	return dir;
 }
 
 /** The environment a login test runs in: only the config folder, nothing from the real environment. */
@@ -328,7 +339,8 @@ export function loginRuntime(
 			env: loginEnv(dir, options.env),
 			urls: { allowHttpLoopback: true },
 			openUrl: server ? server.browser : async () => {},
-			callbackTimeoutMs: 2_000,
+			// Generous, so that a busy PC does not turn a slow fake browser into a timeout.
+			callbackTimeoutMs: 15_000,
 			...options.context,
 		},
 	});

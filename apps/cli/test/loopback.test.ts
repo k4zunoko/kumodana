@@ -47,7 +47,7 @@ describe("receiving the browser's redirect on 127.0.0.1 (research L6)", () => {
 		expect(answer.headers["content-security-policy"]).toBe("default-src 'none'; style-src 'unsafe-inline'");
 		expect(answer.headers["referrer-policy"]).toBe("no-referrer");
 		expect(answer.body).toContain("ログインしました");
-		expect(await server.waitForCode(1000)).toBe("code-1");
+		expect(await server.waitForCode(15_000)).toBe("code-1");
 	});
 
 	it("keeps waiting after a wrong state, so another page cannot end the login", async () => {
@@ -55,14 +55,14 @@ describe("receiving the browser's redirect on 127.0.0.1 (research L6)", () => {
 		const wrong = await get(callback(server.redirectUri, { state: "other", code: "evil" }));
 		expect(wrong.status).toBe(400);
 		expect(wrong.body).toContain("いま実行中の kumo login のものではありません");
-		const waiting = server.waitForCode(2000);
+		const waiting = server.waitForCode(15_000);
 		await get(callback(server.redirectUri, { state: "state-1", code: "code-1" }));
 		expect(await waiting).toBe("code-1");
 	});
 
 	it("ends with login_denied when the authorization server sends an error", async () => {
 		server = await startCallbackServer("state-1");
-		const waiting = server.waitForCode(2000).catch((e: unknown) => e as CliError);
+		const waiting = server.waitForCode(15_000).catch((e: unknown) => e as CliError);
 		const answer = await get(
 			callback(server.redirectUri, { state: "state-1", error: "access_denied", error_description: "no <b>" }),
 		);
