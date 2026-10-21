@@ -129,6 +129,8 @@ async function obtainTokens(
 			}
 
 			const code = await server.waitForCode(ctx.callbackTimeoutMs);
+			// The code is never printed; hide it anyway in case an error description echoes it (FR-015).
+			out.secrets.push(code);
 			let tokens: TokenSet;
 			try {
 				tokens = await exchangeCode(

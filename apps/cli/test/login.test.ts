@@ -71,6 +71,16 @@ describe("kumo login (specs/003-cli-login contracts/cli.md)", () => {
 		expectNoTokens(server, captured);
 	});
 
+	it("hides the authorization code too, in case an error description echoes it (FR-015)", async () => {
+		server = await mockAuthServer();
+		const dir = await tempConfigHome();
+		const { runtime } = loginRuntime(server, dir);
+		expect(await runCommand(runtime, () => login(runtime, server?.url, {}))).toBe(0);
+		const code = server.issued.find((value) => value.startsWith("code-"));
+		expect(code).toBeDefined();
+		expect(runtime.out.secrets).toContain(code);
+	});
+
 	it("listens before registering and registers with that redirect URI (review item 2)", async () => {
 		server = await mockAuthServer();
 		const dir = await tempConfigHome();

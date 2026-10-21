@@ -1,10 +1,11 @@
+import * as fs from "node:fs/promises";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createContext } from "../src/context.ts";
 import { LoginCredentials, REFRESH_MARGIN_MS, resolveCredentials } from "../src/credentials.ts";
 import { CliError } from "../src/errors.ts";
-import { type LoginRecord, readLogin, writeLogin } from "../src/login-store.ts";
+import { type LoginFs, type LoginRecord, readLogin, writeLogin } from "../src/login-store.ts";
 import { createAdminApi } from "../src/runtime.ts";
 import { type AuthServer, loginEnv, loginRuntime, mockAuthServer, sampleRecord, tempConfigHome } from "./auth-server.ts";
 import { captureOutput } from "./helpers.ts";
@@ -132,9 +133,10 @@ async function age(path: string): Promise<LoginRecord> {
 	return aged;
 }
 
-function credentialsFor(record: LoginRecord, path: string, dir: string) {
+function credentialsFor(record: LoginRecord, path: string, dir: string, loginFs?: LoginFs) {
 	const { out, captured } = captureOutput();
-	const credentials = new LoginCredentials({ ...record, session: record.session! }, path, context(dir), out);
+	const ctx = { ...context(dir), ...(loginFs ? { loginFs } : {}) };
+	const credentials = new LoginCredentials({ ...record, session: record.session! }, path, ctx, out);
 	return { credentials, out, captured };
 }
 
@@ -170,7 +172,43 @@ describe("refreshing and saving (specs/003-cli-login research L8・L9)", () => {
 		const { credentials, captured } = credentialsFor(before, path, dir);
 		const headers = await credentials.headers();
 		expect(headers.Authorization).toMatch(/^Bearer oauth:at-/);
-		expect(captured.stderr.join("\n")).toContain("ログインの記録を保存できませんでした");
+		expect(captured.stderr.join("\n")).toContain("ログインの記録を保存できませんでした（login_invalid）");
+	});
+
+	it("names only the file error once in the warning when the rename keeps failing (PR #12 review)", async () => {
+		const { dir, path } = await loggedIn();
+		const before = await age(path);
+		const locked: LoginFs = {
+			readFile: (p, e) => fs.readFile(p, e),
+			writeFile: (p, d, o) => fs.writeFile(p, d, o),
+			rename: async () => Promise.reject(Object.assign(new Error("EPERM"), { code: "EPERM" })),
+			unlink: (p) => fs.unlink(p),
+			mkdir: (p, o) => fs.mkdir(p, o),
+		};
+		const { credentials, captured } = credentialsFor(before, path, dir, locked);
+		await credentials.headers();
+		const warnings = captured.stderr.join("\n");
+		expect(warnings).toContain("警告: ログインの記録を保存できませんでした（EPERM）。次の操作では前の記録で更新します。");
+		expect(warnings.match(/保存できませんでした/g)).toHaveLength(1);
+	});
+
+	it("sends the current token with a warning when the refresh ahead of expiry fails for a temporary reason", async () => {
+		const { dir, path } = await loggedIn();
+		const saved = (await readLogin(path, TEST_URLS)) as LoginRecord;
+		const soon = { ...saved, session: { ...saved.session!, accessTokenExpiresAt: new Date(Date.now() + 30_000).toISOString() } };
+		server!.options.refreshError = { status: 503, error: "temporarily_unavailable" };
+		const { credentials, captured } = credentialsFor(soon, path, dir);
+		expect((await credentials.headers()).Authorization).toBe(`Bearer ${saved.session?.accessToken}`);
+		expect(captured.stderr.join("\n")).toContain("アクセストークンを先に更新できませんでした（refresh_failed）");
+	});
+
+	it("still fails when the grant is gone, even before the access token expires", async () => {
+		const { dir, path } = await loggedIn();
+		const saved = (await readLogin(path, TEST_URLS)) as LoginRecord;
+		const soon = { ...saved, session: { ...saved.session!, accessTokenExpiresAt: new Date(Date.now() + 30_000).toISOString() } };
+		server!.revokeAll();
+		const error = (await credentialsFor(soon, path, dir).credentials.headers().catch((e: unknown) => e)) as CliError;
+		expect(error.code).toBe("login_required");
 	});
 
 	it("lets two refreshes at the same time both succeed and leaves valid JSON", async () => {
