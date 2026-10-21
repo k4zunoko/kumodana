@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { type UrlOpener, openUrl } from "./browser.ts";
+import type { LoginFs } from "./login-store.ts";
 
 export type Env = Record<string, string | undefined>;
 
@@ -26,6 +27,8 @@ export type CliContext = {
 	/** How long `kumo login` waits for the browser (5 minutes, research L6). */
 	callbackTimeoutMs: number;
 	listen?: Listen;
+	/** The file operations for login.json (tests make them fail). */
+	loginFs?: LoginFs;
 };
 
 export const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
