@@ -35,7 +35,7 @@ Worker のテストは変更しない
 
 **Target Platform**: 所有者の Windows PC（CLI）。macOS と Linux でも動くようにする。社内プロキシの内側でも使う
 
-**Project Type**: CLI ＋ 2 つの Web サービス（npm workspaces のモノレポ）。今回変えるのは CLI と、その使い方の文書（README、runbook の §6 以外）。Access の設定値と runbook §6 は #9 で変える
+**Project Type**: CLI ＋ 2 つの Web サービス（npm workspaces のモノレポ）。今回変えるのは CLI と、その使い方の文書（README、runbook の §3・§7・§10）。Access の設定値と runbook §6 は #9 で変える
 
 **Performance Goals**: ブラウザでのログインの待ち時間を除き、`kumo login` は数秒で終わる。新しい PC でのインストールから最初の管理操作まで 3 分以内（SC-001）。
 期限前の更新は管理操作 1 回あたり最大 1 往復を足すだけ
@@ -65,7 +65,7 @@ Worker のテストは変更しない
 | IV. 多層防御 | 管理 API が受け付けるのは、今までどおり「所有者のメールアドレス」と「CLI 用のサービストークン」だけ。ログインの経路は、Access の `owner` ポリシー（所有者のメールアドレス）でしかトークンが出ず、Worker には所有者の `email` を持つ JWT として届く。Worker の JWT の検証（署名と `aud`）は変えないので、Access の設定だけに依存しない。CSRF 対策（独自ヘッダー）もそのまま。トークンはリポジトリに含めず、所有者の PC の `login.json` にだけ置く（L9・L15） | PASS |
 | V. コストには上限を設ける | Access の Managed OAuth は Zero Trust の Free プランで使える（L2）。Worker の処理は増えない（トークンの確かめは Access が行う） | PASS |
 | VI. 重要な経路は自動テストで守る | 管理用 Worker の認証は変えず、既存の workerd のテストで守られたまま。CLI のログイン・更新・取り消し・出力から隠すことは、偽の認可サーバーを使った CLI のテストで守る（L16） | PASS |
-| VII. 小さく保つ | 依存を増やさない。外部サービスは既存の Access の機能（Managed OAuth）を使うだけで、追加の理由と退路を research L1 に記録した。Managed OAuth はベータで版を固定できないため、使えなくなったときはサービストークン（環境変数・`config.json`）で使い続ける。CLI はエンドポイントをメタデータから得て、URL を決め打ちしない | PASS |
+| VII. 小さく保つ | 依存を増やさない。外部サービスは既存の Access の機能（Managed OAuth）を使うだけで、追加の理由と退路を research L1 に記録した。Managed OAuth はベータで版を固定できないため、使えなくなったときはサービストークン（環境変数・`config.json`）で使い続ける。CLI はエンドポイントをメタデータから得て、URL を決め打ちしない。なお、憲法の「ベータ版のツールは版を完全に固定する」はツールを想定した文言で、版を固定できないベータの機能の扱いは書かれていない。「固定できないベータの機能は、退路を記録して使う」と明記する改正は、#10 を決めるときか次の PATCH の改正で行う（PR #11 のレビューの指摘 13。この PR では改正しない） | PASS |
 | 技術・運用上の制約 | Access の設定（Managed OAuth）は手順書に残す必要がある。#4 で検証用の値のまま有効にしてあり、今の値と設定の手順（GET → PUT → 差分の確認）は research L2 に記録した。最終的な値と手順は #9 で runbook §6 に書く（tasks の Phase 8）。設定は `cf zero-trust access applications update --body` かダッシュボードで行い、`cf` は今の版（1.0.0-beta.13）のまま | PASS（#9 で手順書を更新するまで、本番の設定が手順書より先行している点を tasks で追う） |
 
 **Phase 1 後の再確認**: data-model（Worker 側の変更なし、`login.json` の追加）と contracts（CLI の設定・`login`・`logout`・案内、管理 API の 1 段目の追加）を
@@ -117,7 +117,7 @@ apps/cli/
     ├── login.test.ts        # 新規
     └── logout.test.ts       # 新規
 
-docs/runbook.md                                   # 実装の PR: §3・§7・§10。#9: §6（Access の設定値と手順）・検証の記録
+docs/runbook.md                                   # 実装の PR: §3・§7・§10。#9: §6（Access の設定値と手順）・§11 と §12（検証の記録）
 README.md                                         # 実装の PR: 使い方に kumo login・logout
 specs/001-share-shelf-mvp/contracts/cli.md        # 注記: 設定は 003 で置き換えた
 specs/001-share-shelf-mvp/contracts/admin-api.md  # 注記: 認証の 1 段目に 003 の経路
@@ -132,8 +132,8 @@ specs/001-share-shelf-mvp/research.md             # 注記: R3 に 003 の経路
 偽の認可サーバーでテストする。
 
 作業は Issue に合わせて分ける（tasks.md）: #6（ログイン）、#7（保存・更新・管理操作への組み込み）、#8（ログアウト）は実装の PR で行い、
-README と runbook（§6 を除く）の利用者向けの更新もこの PR に含める（tasks の Phase 7）。機能をマージした時点で、main の文書が新しいコマンドに
-追いついているようにするため。#9（Access の最終的な値の設定、runbook §6 の設定手順、本番での確認の記録）はその後に行う（Phase 8）。
+README と runbook（§3・§7・§10）の利用者向けの更新もこの PR に含める（tasks の Phase 7）。機能をマージした時点で、main の文書が新しいコマンドに
+追いついているようにするため。#9（Access の最終的な値の設定、runbook §6 の設定手順、§11・§12 への本番での確認の記録）はその後に行う（Phase 8）。
 #10（サービストークンを残すか）はこの仕様の範囲外。
 
 ## Complexity Tracking

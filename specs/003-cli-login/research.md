@@ -125,8 +125,13 @@
 - **Decision**: `kumo login` のとき、管理用 Worker の URL（`adminUrl`）に対して次の 2 つを取得する。
   1. `<adminUrl>/.well-known/oauth-protected-resource`（RFC 9728）: `resource` を得る。トークンの要求に付ける `resource` は、この値をそのまま使う
   2. `<adminUrl>/.well-known/oauth-authorization-server`（RFC 8414）: `authorization_endpoint`、`token_endpoint`、`revocation_endpoint`、
-     `registration_endpoint` を得る。`code_challenge_methods_supported` に `S256` があり、各エンドポイントが `https:`（テストでは `http://127.0.0.1`）
-     であることを確かめる
+     `registration_endpoint` を得る。`code_challenge_methods_supported` に `S256` があり、各エンドポイントが `https:` であることを確かめる
+  - `resource` は、`adminUrl` と同じオリジンであることだけを確かめる。
+  - メタデータの `issuer` は確かめない。Cloudflare の文書の例では `issuer` が `https://` の付かない `<team>.cloudflareaccess.com` で、RFC 8414 の
+    とおりに厳しく確かめるとログインできなくなるため（レビューの指摘 12）。エンドポイントは `https:` であることと、メタデータを `adminUrl` から
+    取得したことで足りるとする。
+  - URL の検証は `https:` だけを受け付ける。テストは偽の認可サーバーを `http://127.0.0.1` で動かすため、検証の関数に「ループバックの `http:` を許す」
+    指定を渡す。この指定は `createRuntime` などの差し替え口からだけ渡せ、環境変数や引数からは変えられない（レビューの指摘 8）。
   - 得た値は `login.json` に保存し、更新と取り消しでは取得し直さない（L9）。
   - 取得に失敗した、JSON でない、必要な項目がない場合は `login_unavailable` とし、「管理用 Worker の Access で Managed OAuth が有効になっているか」と、
     サービストークンで使い続けられることを案内する。
@@ -140,8 +145,13 @@
   `{ "client_name": "kumo CLI", "redirect_uris": ["http://127.0.0.1:<port>/callback"], "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"], "token_endpoint_auth_method": "none" }`。
   - 登録は PC ごとに 1 回だけ行い、`client_id` を `login.json` に保存して、以後のログインで使い回す（spec FR-006）。ログアウトしても消さない。
-  - 登録し直すのは、`login.json` に登録がないとき、ログインする `adminUrl` が保存したものと違うとき、認可やトークンの要求が `invalid_client` で
-    拒否されたとき（1 回だけ）。
+  - 登録には転送先のポートが要るので、先に待ち受けを始めてから（L6）、そのポートの転送先で登録する（レビューの指摘 2）。後のログインで違うポートで
+    受けてもよい（L2）。
+  - 登録し直すのは、`login.json` に登録がないとき、ログインする `adminUrl` が保存したものと違うとき、コードの交換が `invalid_client` で拒否されたとき
+    （1 回だけ。新しい登録で認可からやり直す）。
+  - 認可の画面での `invalid_client`（登録が消えたなど）は、RFC 6749 §4.1.2.1 のとおり転送先に戻らず、ブラウザにエラーが表示されるだけで、CLI には
+    届かない。CLI は `login_timeout` で終わるので、その案内に「ブラウザにクライアントのエラーが表示された場合は、`login.json` を削除してから
+    `kumo login` を実行してください」を含める（レビューの指摘 3）。自動で登録し直すのは、交換の `invalid_client` のときだけ。
   - 保存の時期: `login.json` に `session` がなければ、登録した直後に保存する。ログインがその後で時間切れや中断になっても、登録は残す
     （資格情報ではない）。`session` があるとき（別の `adminUrl` でのログインし直し、`invalid_client` での登録し直し）は、交換の後に新しい `session` と
     まとめて保存する。途中で失敗しても、前の `session` と、それを発行した `client`・`endpoints` の組が崩れないようにするため。
@@ -197,8 +207,13 @@
     1. 管理 API を呼ぶ前に、期限まで 60 秒を切っていれば更新する
     2. 管理 API が 401 を返したら（`WWW-Authenticate: Bearer` か Worker の `unauthenticated`）、1 回だけ更新して同じ要求をやり直す
        （送る本文はバイト列か JSON で、もう一度送れる）。やり直しても 401 なら `login_required`
-  - 更新が `invalid_grant` などで拒否されたら、`login.json` を読み直す。ほかの `kumo` が新しいリフレッシュトークンを書いていれば、それで 1 回だけやり直す。
-    同じなら `login_required`（「`kumo login` を実行してください」）。
+  - 更新が `invalid_grant`・`invalid_client`・`unauthorized_client` で拒否されたら、`login.json` を読み直す。ほかの `kumo` が新しいリフレッシュトークンを
+    書いていれば、それで 1 回だけやり直す（そのアクセストークンが期限内なら、更新せずにそれを使う）。同じなら `login_required`（「`kumo login` を
+    実行してください」）。それ以外の失敗（認可サーバーの 5xx など）は `refresh_failed`、通信の失敗は `network_error` にする。
+  - 更新したトークンを書く前に、`login.json` を読み直し、`adminUrl` と `session.loggedInAt` が読み込んだときと同じ場合だけ書く（レビューの指摘 4）。
+    その間に `kumo login` が新しい `session` を書いていた、または `kumo logout` が `session` を消していた場合は書かず、手元の新しいトークンで
+    その操作だけを続ける。古い `session` を書き戻して、新しいログインを `login_required` にしたり、ログアウトを取り消したりしないため。
+    読み直しと置き換えの間のごく短い間の重なりは残るが、そのときも次の管理操作が `login_required` になるだけで、ログインし直せば直る。
   - トークンの要求（交換・更新・取り消し・登録）は `redirect: "error"` で送り、転送に従わない。
 - **Rationale**:
   - 期限の前に更新すれば、ふだんは 401 を待たずに済む。401 での更新とやり直しは、期限の計算のずれや、Access 側の事情への備え。
@@ -218,6 +233,9 @@
     新しい内容のどちらかになる。
   - Windows で置き換えが `EPERM`・`EACCES`・`EBUSY` で失敗したら（ほかのプログラムが開いているなど）、50・100・200 ミリ秒待って最大 3 回やり直す。それでも失敗したら、
     一時ファイルを消し、警告を出して処理は続ける（前のリフレッシュトークンも使える。L2）。
+  - 読み込みも、`EPERM`・`EACCES`・`EBUSY` なら同じ間隔で最大 3 回やり直す。Windows では、ほかの `kumo` が置き換えている最中の読み込みが失敗しうる
+    ため（レビューの指摘 5）。それでも失敗したら `login_read_failed`（終了コード 1）。`login_invalid`（終了コード 2）にするのは、JSON や形式の
+    誤りだけ。
   - Windows 以外では、フォルダーを作るときは 700、一時ファイルは 600 で作る（置き換えた後の `login.json` も 600 になる）。
   - Windows では権限を変えない。`%APPDATA%` はユーザーのプロファイルの中にあり、既定でそのユーザー（と SYSTEM・管理者）だけが読める。
 - **Rationale**:
@@ -237,6 +255,8 @@
      `adminUrl` と違えば、トークンを送らずに `admin_url_mismatch`（終了コード 2）
   3. `config.json` に `clientId` か `clientSecret` があれば、**サービストークン**（今と同じ。足りなければ `config_missing`）
   4. どれもなければ `config_missing`（終了コード 2）で、`kumo login <adminUrl>` を案内する
+  - 方法は上の条件だけで決め、値がそろっているかは方法を決めた後に確かめる（レビューの指摘 1）。管理操作は、サービストークンの値が足りなければ今と同じ
+    `config_missing` にする。`kumo login --status` は、足りない項目の名前を `notes` に出して終了コード 0 で終わる。
   - URL の比較は、末尾の `/` を除いた形で行う（今の `loadConfig` と同じ正規化）。
   - `config.json` の `adminUrl` は、サービストークンの経路と、`kumo login` で URL を省略したときの候補にだけ使う。ログインの経路では使わない
     （`login.json` と違っていても誤りにしない。`kumo login --status` で食い違いを知らせる）。
@@ -254,8 +274,10 @@
     今の `access_denied` と同じ案内（Managed OAuth を有効にした後は、誤ったサービストークンにも 401 が返りうる）
   - Worker の 401 `unauthenticated`: 方法ごとの案内。403 `forbidden`: ログインなら「ログインしたアカウントが所有者のものか、管理用 Worker の
     `OWNER_EMAIL` と一致しているか」を案内する
+  - Access の 403（本文が JSON でない）: サービストークンなら今の `access_denied`。ログインなら同じ `access_denied` で、「ログインしたアカウントが
+    所有者のものか、Access の `owner` ポリシーを確かめてください」と案内する（レビューの指摘 6）
   - Access のログイン画面への 302: サービストークンなら今の `access_login_required`。ログインなら `login_required`
-  - 更新・交換の `invalid_grant`: L8 の読み直しの後に `login_required`。`invalid_client`: ログインのときは登録し直し（L5）、更新のときは `login_required`
+  - 更新・交換の `invalid_grant`: L8 の読み直しの後に `login_required`。`invalid_client`: 交換のときは登録し直し（L5）、更新のときは `login_required`
 - **Rationale**: 方法に合わない案内（ログインしているのに「シークレットを確かめて」）は、直し方を誤らせる。`login_required` は、期限切れと取り消しを
   区別しない（CLI からは区別できず、対処も同じ）。
 
@@ -280,6 +302,9 @@
   前の許可の取り消しには、前の記録のエンドポイントと `client_id` を使う。
 - **Rationale**: ログインのたびに許可が増えると、使われない許可が期間まで残る。取り消しを後にするのは、新しいログインが失敗したときに前の許可を失わないため。
   確かめを取り消しの後に行うので、取り消しが新しい許可にまで効いてしまう場合も気づける（L2 の未確認。#8・#9 の本番確認で見る）。
+- **退路**（レビューの指摘 7）: 前の許可を取り消した後の確かめが `login_required` で失敗したときは、「`kumo logout` の後に `kumo login` を実行してください」と
+  案内する。`kumo logout` で `session` が消えた後の `kumo login` は、前の許可がないので取り消しを行わない。本番で、取り消しが同じクライアントの
+  別の許可にも効くと分かったら、この節を「取り消さない」か「交換の前に取り消す」に変える。
 
 ## L14. 出力から隠す値
 

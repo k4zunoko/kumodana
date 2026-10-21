@@ -86,7 +86,8 @@ kumo usage
 ### US4: 状態の確認
 
 - 期待: `kumo login --status` が、方法・URL・ログインした日時・アクセストークンの期限を表示する。ネットワークを切っても同じ結果になる
-- 期待: `$env:KUMODANA_CLIENT_ID = "x"` を設定すると、方法が `サービストークン（環境変数）` になる（確認の後に `Remove-Item Env:KUMODANA_CLIENT_ID`）
+- 期待: `$env:KUMODANA_CLIENT_ID = "x"` を設定すると、方法が `サービストークン（環境変数）` になり、足りない項目（`KUMODANA_CLIENT_SECRET`、
+  `KUMODANA_ADMIN_URL`）が知らされる。終了コードは 0（確認の後に `Remove-Item Env:KUMODANA_CLIENT_ID`）
 
 ### 既存の経路（SC-007）
 
@@ -96,4 +97,4 @@ kumo usage
 ### 後片付け
 
 - 一時フォルダー（`$env:TEMP\kumo-login-check`）を、`kumo logout` の後に削除する
-- 結果を runbook の検証の記録に残す（#9。個人を特定できる値は書かない）
+- 結果を runbook に残す（#9 の T038。quickstart の結果は §12、research L2 の未確認の項目の結果は §11。個人を特定できる値は書かない）
