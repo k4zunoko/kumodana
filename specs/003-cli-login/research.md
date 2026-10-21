@@ -185,7 +185,7 @@
 ## L7. ブラウザの起動
 
 - **Decision**: 認可の URL を、まず標準エラー出力に表示し、続けて既定のブラウザで開く。シェルを通さずに起動する（`spawn`、`shell: false`）。
-  - Windows: `%SystemRoot%\System32\rundll32.exe url.dll,FileProtocolHandler <url>`（絶対パスで起動する。`SystemRoot` がなければ `C:\Windows`）
+  - Windows: `%SystemRoot%\System32\rundll32.exe url.dll,FileProtocolHandler <url>`（絶対パスで起動する。`SystemRoot` がないときや、絶対パスでないとき（空、空白だけ、相対パス）は `C:\Windows`）
   - macOS: `open <url>`、それ以外: `xdg-open <url>`
   - 起動に失敗しても（コマンドがないなど）、URL は表示済みなので、そのまま待つ。`--no-open` のときは開かずに待つ。
   - 開く関数は差し替え可能にし、テストでは「ブラウザと Access の役」をする関数に替える。
@@ -207,7 +207,8 @@
   - アクセストークンの期限は「受け取った時刻 ＋ `expires_in`」として保存する。
   - 更新の時期:
     1. 管理 API を呼ぶ前に、期限まで 60 秒を切っていれば更新する。この先回りの更新が一時的な理由（`network_error`・`refresh_failed`）で失敗し、
-       アクセストークンの期限がまだ過ぎていなければ、警告を出して今のトークンで送る（PR #12 のレビュー）。許可が消えているとき（`login_required`）は
+       アクセストークンの期限がまだ過ぎていなければ、警告を出して今のトークンで送る（PR #12 のレビュー）。期限は、実際に送るトークンの
+       session のもので判断する（更新の途中で、ほかの `kumo` が書いた session に入れ替わることがあるため。PR #12 の再レビュー）。許可が消えているとき（`login_required`）は
        そのまま失敗にする
     2. 管理 API が 401 を返したら（`WWW-Authenticate: Bearer` か Worker の `unauthenticated`）、1 回だけ更新して同じ要求をやり直す
        （送る本文はバイト列か JSON で、もう一度送れる）。やり直しても 401 なら `login_required`
