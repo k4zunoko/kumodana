@@ -7,6 +7,11 @@ const program = new Command("kumo")
 	.description("kumodana（雲棚）: 画像、HTML、Markdown 文書を置いてリンクで共有する、自分専用の棚")
 	.version("0.1.0")
 	.option("--json", "結果を JSON で出力する")
+	.addHelpText(
+		"after",
+		"\n初めて使うときは、kumo login <管理用 Worker の URL> でブラウザからログインする。" +
+			"\n使われる資格情報は kumo login --status で確かめられる。手順は docs/runbook.md §7 を参照。",
+	)
 	.showHelpAfterError()
 	.exitOverride();
 
