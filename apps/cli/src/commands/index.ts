@@ -3,6 +3,7 @@ import type { Runtime } from "../runtime.ts";
 import { registerGet } from "./get.ts";
 import { registerLink } from "./link.ts";
 import { registerLogin } from "./login.ts";
+import { registerLogout } from "./logout.ts";
 import { registerLs } from "./ls.ts";
 import { registerPreview } from "./preview.ts";
 import { registerPut } from "./put.ts";
@@ -28,4 +29,5 @@ export const commands: Register[] = [
 	registerLink,
 	registerUsage,
 	registerLogin,
+	registerLogout,
 ];
