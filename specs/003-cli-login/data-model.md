@@ -46,9 +46,9 @@ CLI は読むだけ。`clientId` と `clientSecret` はサービストークン�
 | 項目 | 内容 | 規則 |
 |---|---|---|
 | `version` | 形式の版 | `1` だけを受け付ける |
-| `adminUrl` | ログインした管理 API の URL | 末尾の `/` を除いた形。`https:`（テストだけ `http://127.0.0.1`） |
-| `resource` | トークンの要求に付ける `resource` | `/.well-known/oauth-protected-resource` の値のまま（research L4） |
-| `endpoints` | 認可、トークン、取り消し、登録の URL | `/.well-known/oauth-authorization-server` の値。すべて `https:`（テストだけ `http://127.0.0.1`） |
+| `adminUrl` | ログインした管理 API の URL | 末尾の `/` を除いた形。`https:` だけ（下の「URL の検証」） |
+| `resource` | トークンの要求に付ける `resource` | `/.well-known/oauth-protected-resource` の値のまま（research L4）。`adminUrl` と同じオリジン |
+| `endpoints` | 認可、トークン、取り消し、登録の URL | `/.well-known/oauth-authorization-server` の値。すべて `https:` だけ（下の「URL の検証」） |
 | `client.clientId` | 動的登録で得た OAuth のクライアント ID（**サービストークンの `clientId` とは別物**） | この PC で 1 回だけ作る（research L5）。ログアウトしても消さない |
 | `client.registeredAt` | 登録した日時 | ISO 8601（UTC） |
 | `session` | 今の許可の資格情報。ログインしていなければ `null` | ログアウトで `null` にする |
@@ -56,12 +56,19 @@ CLI は読むだけ。`clientId` と `clientSecret` はサービストークン�
 | `session.accessTokenExpiresAt` | アクセストークンの期限 | 受け取った時刻 ＋ `expires_in` |
 | `session.refreshToken` | リフレッシュトークン | 出力に表示しない。更新のたびに置き換える |
 | `session.loggedInAt` | ブラウザでログインした日時 | 許可の期間の起点の目安（research L2 の未確認）。更新では変えない |
-| `session.refreshedAt` | 最後にアクセストークンを取得・更新した日時 | |
+| `session.refreshedAt` | 最後にアクセストークンを取得・更新した日時 | 省略できる |
 
-- 読み込みの検証: JSON として読めない、`version` が `1` でない、必須の項目（`adminUrl`、`endpoints`、`client`）の型が違う場合は `login_invalid`
-  （終了コード 2）。資格情報の値は表示せず、`kumo login` でログインし直すよう案内する。`kumo login` は壊れた `login.json` を無視して作り直す
-  （登録もし直す）。
-- `session` があるのに `client` がない、などの組み合わせも `login_invalid` とする。
+- 読み込みの検証（レビューの指摘 9）: 次のどれかに当たる場合は `login_invalid`（終了コード 2）。資格情報の値は表示せず、`kumo login` でログインし直す
+  よう案内する。`kumo login` は壊れた `login.json` を無視して作り直す（登録もし直す）。
+  - JSON として読めない、最上位がオブジェクトでない、`version` が `1` でない
+  - 必須の項目（`adminUrl`、`resource`、`endpoints` の 4 つ、`client.clientId`、`client.registeredAt`）がない、文字列でない、URL の検証に通らない
+  - `session` が `null` でもオブジェクトでもない。`session` がオブジェクトのとき、`accessToken`・`refreshToken`・`accessTokenExpiresAt`・`loggedInAt` が
+    空でない文字列でない、または日時として読めない。`refreshedAt` はあれば文字列
+- 読み込みのエラー（レビューの指摘 5）: `ENOENT` は「記録なし」。`EPERM`・`EACCES`・`EBUSY` は、50・100・200 ミリ秒待って最大 3 回やり直し、
+  それでも失敗したら `login_read_failed`（終了コード 1）。JSON や形式の誤りだけを `login_invalid` にする。
+- URL の検証（レビューの指摘 8）: `adminUrl`・`resource`・`endpoints` は `https:` だけを受け付ける。テストは偽の認可サーバーを `http://127.0.0.1` で
+  動かすため、検証の関数に「ループバックの `http:` を許す」指定を渡す。指定は CLI の実行時の設定（`createRuntime` などの差し替え口）からだけ渡せ、
+  環境変数や引数からは変えられない。本番のコマンドは常に `https:` だけを受け付ける。
 
 ## CLI の中だけで使う値（保存しない）
 
@@ -69,10 +76,13 @@ CLI は読むだけ。`clientId` と `clientSecret` はサービストークン�
 
 | `method` | 条件（research L10） | 持つ値 |
 |---|---|---|
-| `env_service_token` | 環境変数 `KUMODANA_CLIENT_ID` か `KUMODANA_CLIENT_SECRET` がある | `adminUrl`、`clientId`、`clientSecret`（今の `CliConfig`） |
+| `env_service_token` | 環境変数 `KUMODANA_CLIENT_ID` か `KUMODANA_CLIENT_SECRET` がある | `adminUrl`、`clientId`、`clientSecret`（今の `CliConfig`。足りない項目があってもよく、その名前の一覧 `missing` を持つ） |
 | `login` | 上でなく、`login.json` に `session` がある | `adminUrl`、`login.json` の内容 |
-| `config_service_token` | 上でなく、`config.json` に `clientId` か `clientSecret` がある | `adminUrl`、`clientId`、`clientSecret` |
+| `config_service_token` | 上でなく、`config.json` に `clientId` か `clientSecret` がある | `adminUrl`、`clientId`、`clientSecret`、`missing`（同上） |
 | `none` | どれもない | なし（管理操作は `config_missing`） |
+
+- 方法は「条件」だけで決め、値がそろっているかは確かめない（レビューの指摘 1）。管理操作は、方法がサービストークンで `missing` があれば `config_missing`
+  にする（今の `loadConfig` と同じ文言）。`kumo login --status` は `missing` を `notes` に出し、誤りにしない。
 
 ### ログインの途中の値（`PendingLogin`）
 
@@ -100,6 +110,9 @@ CLI は読むだけ。`clientId` と `clientSecret` はサービストークン�
                                     └─ kumo login で [ログイン中] に置き換わる
 ```
 
+- アクセストークンの更新で書くときは、書く前に `login.json` を読み直し、`adminUrl` と `session.loggedInAt` が読み込んだときと同じ場合だけ書く。
+  その間に `kumo login` が新しい `session` を書いた、または `kumo logout` が `session` を消した場合は、書かない（古い `session` を書き戻さない。
+  レビューの指摘 4）。読み直しと置き換えの間のごく短い間の重なりは残るが、そのときも次の管理操作が `login_required` になるだけで、ログインし直せば直る。
 - 「使えないログイン」は CLI からは管理操作のときにしか分からない。CLI は `session` を自動では消さず、`login_required` で `kumo login` を案内する
   （ほかの `kumo` が同時にログインし直している場合に、新しい記録を消さないため）。
 - `kumo login` は、どの状態からでも新しい `session` に置き換える。前の `session` があれば、その許可を取り消す（research L13）。
