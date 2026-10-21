@@ -7,7 +7,10 @@ import { CliError } from "../src/errors.ts";
 
 const created: string[] = [];
 afterEach(async () => {
-	await Promise.all(created.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+	// Retry while Windows keeps a file busy, and never fail a test over cleanup (PR #12 re-review).
+	await Promise.all(
+		created.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined)),
+	);
 });
 
 async function tempConfigDir(content?: unknown): Promise<string> {

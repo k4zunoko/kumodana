@@ -10,7 +10,7 @@ import {
 	readLogin,
 	writeLogin,
 } from "../src/login-store.ts";
-import { sampleRecord, tempConfigHome } from "./auth-server.ts";
+import { removeTempDirs, sampleRecord, tempConfigHome } from "./auth-server.ts";
 
 const TEST_URLS = { allowHttpLoopback: true };
 const STRICT = { allowHttpLoopback: false };
@@ -151,6 +151,20 @@ describe("login.json store (specs/003-cli-login data-model)", () => {
 		expect(error.details?.errno).toBe("EACCES");
 		expect(await readLogin(path, STRICT)).toEqual(first);
 		expect((await readdir(join(path, ".."))).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+	});
+
+	it("retries the cleanup of test folders and never fails over it (PR #12 re-review)", async () => {
+		const seen: { dir: string; maxRetries: number }[] = [];
+		await expect(
+			removeTempDirs(["a", "b"], async (dir, options) => {
+				seen.push({ dir, maxRetries: options.maxRetries });
+				throw busy("EBUSY");
+			}),
+		).resolves.toBeUndefined();
+		expect(seen).toEqual([
+			{ dir: "a", maxRetries: 10 },
+			{ dir: "b", maxRetries: 10 },
+		]);
 	});
 
 	it.skipIf(process.platform === "win32")("makes the file 600 and a new folder 700", async () => {
