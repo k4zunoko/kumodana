@@ -276,3 +276,44 @@ describe("refreshing and saving (specs/003-cli-login research L8・L9)", () => {
 		expect(error.code).toBe("refresh_failed");
 	});
 });
+
+describe("the refresh ahead of expiry after switching to another kumo's session (PR #12 re-review)", () => {
+	const BASE = "http://127.0.0.1:1";
+
+	/**
+	 * This kumo holds `mine`; login.json holds `theirs`, written by another kumo. The token endpoint rejects
+	 * `mine` (so the credentials switch to `theirs`) and fails temporarily for `theirs`.
+	 */
+	async function setUp(mine: number, theirs: number) {
+		const dir = await home();
+		const path = join(dir, "kumodana", "login.json");
+		const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+		const own = sampleRecord(BASE, { accessToken: "oauth:at-mine", refreshToken: "oauth:rt-mine", accessTokenExpiresAt: at(mine) });
+		const other = sampleRecord(BASE, { accessToken: "oauth:at-theirs", refreshToken: "oauth:rt-theirs", accessTokenExpiresAt: at(theirs) });
+		await writeLogin(path, other);
+		const fetchImpl: typeof fetch = async (_input, init) => {
+			const form = new URLSearchParams(String(init?.body));
+			if (form.get("refresh_token") === "oauth:rt-mine") {
+				return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 });
+			}
+			return new Response(JSON.stringify({ error: "temporarily_unavailable" }), { status: 503 });
+		};
+		const { out, captured } = captureOutput();
+		const ctx = { ...context(dir), fetchImpl };
+		const credentials = new LoginCredentials({ ...own, session: own.session! }, path, ctx, out);
+		return { credentials, captured };
+	}
+
+	it("sends the switched-to token when that token has not expired, even if its own had", async () => {
+		const { credentials, captured } = await setUp(-1000, 30_000);
+		expect((await credentials.headers()).Authorization).toBe("Bearer oauth:at-theirs");
+		expect(captured.stderr.join("\n")).toContain("アクセストークンを先に更新できませんでした（refresh_failed）");
+	});
+
+	it("fails when the switched-to token has expired, even if its own had not", async () => {
+		const { credentials } = await setUp(30_000, -1000);
+		const error = (await credentials.headers().catch((e: unknown) => e)) as CliError;
+		expect(error).toBeInstanceOf(CliError);
+		expect(error.code).toBe("refresh_failed");
+	});
+});
