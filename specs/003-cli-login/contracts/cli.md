@@ -58,7 +58,8 @@
 6. ブラウザからの応答を待つ（最長 5 分）。`state` が一致する `code` を受け取ったら、完了のページを返して待ち受けを閉じる
 7. コードをトークンに交換し、`login.json` の `adminUrl`・`resource`・`endpoints`・`client`・`session` を置き換える。保存できなかったときは、
    新しいリフレッシュトークンをできる範囲で取り消してから `login_write_failed` で終わる（PR #12 のレビュー）
-8. 前の `session` があれば、そのリフレッシュトークンを取り消す（失敗したら警告）
+8. 前の `session` があれば、そのリフレッシュトークンを取り消す（失敗したら警告。前の許可がすでに無効で `400 invalid_grant` が返ったときは、何もしなくて
+   よいので警告しない。T035）
 9. 新しいアクセストークンで `GET /api/usage` を呼び、結果を表示する。手順 8 で前の許可を取り消した後に、ここが `login_required` で失敗したときは、
    取り消しが新しい許可にも効いた可能性がある。「`kumo logout` の後に `kumo login` を実行してください」と案内する（前の `session` がなければ、
    取り消しは行われない。research L13、レビューの指摘 7）。記録は保存済みで、終了コードは `1`
@@ -166,9 +167,11 @@
 この PC の許可を取り消し、`login.json` から資格情報を消す（research L12、spec FR-016〜FR-019）。
 
 1. `login.json` に `session` がなければ、`ログインしていません。` と表示して終了コード `0`
-2. 取り消しのエンドポイントにリフレッシュトークンを送って取り消す
+2. 取り消しのエンドポイントにリフレッシュトークンを送って取り消す。応答が `400 invalid_grant` のときは、許可が**すでに無効**（取り消し済みか、
+   許可の期間切れ）とみなす。Access は、無効なトークンの取り消しに RFC 7009 の 200 ではなく `400 invalid_grant` を返すため（T035。research L2）
 3. 成否にかかわらず、`login.json` の `session` を `null` にする（`adminUrl`、`endpoints`、`client` は残す）
-4. 取り消せなかったら、結果を出した後に `revoke_failed`（終了コード `1`）を出す。`kumo rm` でキャッシュの削除に失敗したとき（処理は済み、最後に終了コード `1`）と
+4. 取り消した、またはすでに無効だったときは終了コード `0`。取り消せなかったとき（通信の失敗、5xx、`invalid_grant` 以外のエラー。許可が残っている
+   かもしれないとき）だけ、結果を出した後に `revoke_failed`（終了コード `1`）を出す。`kumo rm` でキャッシュの削除に失敗したとき（処理は済み、最後に終了コード `1`）と
    同じ扱い（レビューの指摘 10）
 
 ### 出力（人向け）
@@ -177,6 +180,8 @@
 ログアウトしました: https://kumodana-admin.<subdomain>.workers.dev（この PC の許可を取り消しました）
 ```
 
+- 許可がすでに無効だったとき: `ログアウトしました: <adminUrl>（この PC の許可はすでに無効でした）`
+
 - 警告（標準エラー出力）:
   - 環境変数のサービストークンがあるとき: `警告: 環境変数 KUMODANA_CLIENT_ID・KUMODANA_CLIENT_SECRET があるため、今後もそのサービストークンで管理操作が行われます。`
   - `config.json` にサービストークンがあるとき: 今後はそのサービストークンが使われることを知らせる
@@ -184,11 +189,14 @@
 ### 出力（`--json`）
 
 ```json
-{ "loggedOut": true, "revoked": true, "adminUrl": "https://kumodana-admin.<subdomain>.workers.dev" }
+{ "loggedOut": true, "revoked": true, "alreadyInvalid": false, "adminUrl": "https://kumodana-admin.<subdomain>.workers.dev" }
 ```
 
-- ログインしていなかったときは `{ "loggedOut": false, "revoked": false, "adminUrl": null }`。
-- 取り消しに失敗したときも、標準出力には `{ "loggedOut": true, "revoked": false, "adminUrl": "…" }` を出し、標準エラー出力に `revoke_failed` の
+- `revoked` は、この PC の許可がもう使えないこと（今回取り消した、またはすでに無効だった）を表す。`alreadyInvalid` は、すでに無効だったときだけ
+  `true`（T035 の後に追加）。
+- 許可がすでに無効だったときは `{ "loggedOut": true, "revoked": true, "alreadyInvalid": true, "adminUrl": "…" }` で、終了コード `0`。
+- ログインしていなかったときは `{ "loggedOut": false, "revoked": false, "alreadyInvalid": false, "adminUrl": null }`。
+- 取り消しに失敗したときも、標準出力には `{ "loggedOut": true, "revoked": false, "alreadyInvalid": false, "adminUrl": "…" }` を出し、標準エラー出力に `revoke_failed` の
   エラー（`{ "error": { "code": "revoke_failed", … } }`）を出して、終了コード `1` で終わる。
 - 人向けの表示では、取り消しに失敗したとき `ログアウトしました: <adminUrl>（この PC の資格情報を消しました。許可は取り消せていません）` と出す。
 
@@ -196,7 +204,7 @@
 
 | `code` | 条件 | 終了コード |
 |---|---|---|
-| `revoke_failed` | 取り消しに失敗した（通信の失敗、エラーの応答）。資格情報は消してある。案内: 許可は期間まで有効なこと、取り消す方法（runbook §7 の `cf zero-trust access applications revoke-tokens <app-id>` と `cf zero-trust access users revoke --email <owner>`。どちらもほかの PC の許可も消える） | `1` |
+| `revoke_failed` | 取り消しに失敗した（通信の失敗、5xx、`invalid_grant` 以外のエラーの応答）。`400 invalid_grant` はすでに無効として成功にするので、ここには入らない。メッセージは「この PC の許可を取り消せませんでした（<error>: <説明>）。許可は期間が切れるまで有効です。」の形で、理由を 1 回だけ示す。資格情報は消してある。案内: 許可は期間まで有効なこと、取り消す方法（runbook §7 の `cf zero-trust access applications revoke-tokens <app-id>` と `cf zero-trust access users revoke --email <owner>`。どちらもほかの PC の許可も消える） | `1` |
 | `login_invalid` | `login.json` が壊れている。案内: `login.json` を削除してよいこと、許可を取り消す方法（上と同じ） | `2` |
 | `login_write_failed` | `login.json` から資格情報を消せない（取り消しは済んでいることがある） | `1` |
 
