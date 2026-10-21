@@ -329,7 +329,7 @@
 
 ## L16. テスト
 
-- **Decision**: Vitest（Node.js、`apps/cli`）で、偽の認可サーバー兼管理 API（`node:http` のローカルサーバー。既存の `mockApi` を広げる）を使って確かめる。
+- **Decision**: Vitest（Node.js、`apps/cli`）で、偽の認可サーバー兼管理 API（`node:http` のローカルサーバー。`apps/cli/test/auth-server.ts`）を使って確かめる。
   - 偽のサーバーは、2 つのメタデータ、登録、認可（ブラウザと Access の役。転送先に `code` と `state` を付けて 302 を返す）、交換、更新（毎回違う
     リフレッシュトークンを返し、古いものも受け付ける）、取り消し、`/api/usage` を持つ
   - ブラウザを開く関数を差し替え、認可の URL に `fetch` して転送先までたどる（転送先はテスト中の待ち受け）。時間切れの上限も差し替えて短くする
