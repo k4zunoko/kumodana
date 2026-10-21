@@ -6,11 +6,12 @@ export type UrlOpener = (url: string) => Promise<void>;
 
 /**
  * The Windows folder. Programs there are started by absolute path: given a bare name, Windows looks in the current
- * folder before PATH, so a file named like the program in that folder would run instead (CWE-427).
+ * folder before PATH, so a file named like the program in that folder would run instead (CWE-427). A `SystemRoot`
+ * that is not an absolute path (empty, blank, or relative) would bring that lookup back, so it is not trusted.
  */
 export function windowsDir(env: Record<string, string | undefined> = process.env): string {
 	const root = env.SystemRoot?.trim();
-	return root ? root : String.raw`C:\Windows`;
+	return root && win32.isAbsolute(root) ? root : String.raw`C:\Windows`;
 }
 
 /**
