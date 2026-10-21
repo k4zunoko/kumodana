@@ -231,6 +231,7 @@ Task: "apps/cli/src/commands/login.ts に kumo login を実装する"
 - 意味のまとまりごとに commit する（テストの道具、保存と選択、ログイン、更新、ログアウト、状態の表示、文書）
 - 完了したタスクは `[X]` にする
 - #10（CLI 用サービストークンを残すか廃止するか）は、この tasks の範囲外。#9 の後に決める
+  （2026-10-21 注記: #10 で、サービストークンは退路として残し、シークレットは PC に置かない（どこにも保存せず、使うときに `rotate` して環境変数で一時的に使う）と決めた。docs/runbook.md §3・§7）
 - 実装メモ（2026-10-21）:
   - 実装の前に、PR #11 のレビューの指摘 13 件を文書に反映した（`docs: address the review of the 003 specification`）。指摘 13（憲法の文言）は
     この PR では改正せず、plan の Constitution Check に記録した
