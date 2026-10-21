@@ -151,9 +151,9 @@ description: "Task list for 003-cli-login"
 
 **Purpose**: Access の最終的な設定と、その値・手順の runbook §6 への記載、本番での確認の記録（憲法の「Cloudflare 側の設定は手順書に残す」）
 
-- [ ] T036 （所有者が実施）ダッシュボードの `kumodana-admin` の Advanced settings で、Managed OAuth のアクセストークンの有効期間を 15 分（既定）、グラントセッション期間を 1 週間（選択肢になければ 1 週間以下でいちばん長い値）にして保存する（research L3）。その後 `cf zero-trust access applications get <app-id>` で `oauth_configuration` を確かめ、実際に入った値を控える
-- [ ] T037 `docs/runbook.md` §6 に Managed OAuth の設定（T036 で入った値とその理由、ダッシュボードの手順、`cf zero-trust access applications update --body` の手順と PUT で全体を送る注意、ダッシュボードで選択肢にない値は空欄と表示され保存し直すと変わるおそれ）を加える
-- [ ] T038 本番での確認の結果を `docs/runbook.md` に残す。quickstart の結果（T035 と、T036 の設定後の 15 分・1 週間での動き）は §12（本番検証の記録）に、research L2 の未確認の項目の結果は §11（検証の記録）に書く（個人を特定できる値は書かない）
+- [X] T036 （所有者が実施）ダッシュボードの `kumodana-admin` の Advanced settings で、Managed OAuth のアクセストークンの有効期間を 15 分（既定）、グラントセッション期間を 1 週間（選択肢になければ 1 週間以下でいちばん長い値）にして保存する（research L3）。その後 `cf zero-trust access applications get <app-id>` で `oauth_configuration` を確かめ、実際に入った値を控える
+- [X] T037 `docs/runbook.md` §6 に Managed OAuth の設定（T036 で入った値とその理由、ダッシュボードの手順、`cf zero-trust access applications update --body` の手順と PUT で全体を送る注意、ダッシュボードで選択肢にない値は空欄と表示され保存し直すと変わるおそれ）を加える
+- [X] T038 本番での確認の結果を `docs/runbook.md` に残す。quickstart の結果（T035 と、T036 の設定後の 15 分・1 週間での動き）は §12（本番検証の記録）に、research L2 の未確認の項目の結果は §11（検証の記録）に書く（個人を特定できる値は書かない）
 
 ---
 
@@ -271,3 +271,14 @@ Task: "apps/cli/src/commands/login.ts に kumo login を実装する"
   - 偽の認可サーバーは、取り消し済みと未知のトークンの取り消しに `400 invalid_grant` を返す（本番の振る舞い。設定で RFC 7009 の 200 にもできる）
   - T035 で確かめた振る舞い（前の許可の取り消しが新しい許可に効かないこと、古いリフレッシュトークンでの取り消しでも許可全体が消えること）は、
     research L2 に書いた
+- Phase 8（#9）の実装メモ（2026-10-21）:
+  - T036: 所有者がダッシュボード（Zero Trust → Access controls → Applications → `kumodana-admin` → 編集 → Advanced settings → マネージドOAuth）で、
+    アクセストークンの有効期間を 15 minutes、グラントセッション期間を 1 week に設定した。どちらもドロップダウンの選択肢にあった。
+    API で読むと `15m`・`168h` で、ほかの設定は変わっていなかった。無効なトークンの取り消しは今も `400 invalid_grant`（未知のクライアントは
+    `401 invalid_client`）で、新しい値でのログインでは、アクセストークンの期限が発行から 15 分だった
+  - T037: runbook §6 に「Managed OAuth（`kumo login` 用）」を加えた（値と理由、ダッシュボードと API の手順、API で確かめる値、注意）。
+    PR #12 の最終レビューで #9 に回された 2 点（§7 の、許可の期間が切れた後の `kumo logout` の表示。設定を変えたときに取り消しの応答を確かめること）
+    も、§7 と §6 の注意に入れた
+  - T038: runbook §11 に research L2・L3・L7 の確認の結果と、未確認の項目（許可の期間の起点、別の PC への影響、期限切れの 401）とその確かめ方を、
+    §12 に T035・T036 の結果を書いた
+  - 許可の期間の起点は、まだ確かめていない（1 週間かかるため）。確かめたら runbook §11 の表に書く

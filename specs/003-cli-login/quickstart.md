@@ -3,7 +3,7 @@
 **Feature**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md) | **Contracts**: [contracts/cli.md](./contracts/cli.md)、[contracts/admin-api.md](./contracts/admin-api.md)
 
 実装が仕様どおりに動くことを確かめる手順。変わるのは kumo CLI だけで、Worker のデプロイは要らない。Access の設定（Managed OAuth の期間の値）は
-#9 で変える。
+2026-10-21 から、アクセストークン 15 分、許可 1 週間（runbook §6）。2026-10-21 の結果は runbook §12 にある。
 
 ## 前提
 
@@ -58,12 +58,12 @@ Measure-Command { kumo login https://kumodana-admin.<subdomain>.workers.dev | Ou
 
 ### US2: ブラウザを開かずに使い続ける（SC-002、SC-005、SC-006）
 
-- 期待: アクセストークンの期限（今の設定では 5 分、#9 の後は 15 分）を過ぎてから `kumo usage` を実行すると、ブラウザを開かずに成功し、
+- 期待: アクセストークンの期限（15 分。2026-10-21 より前の検証用の値では 5 分）を過ぎてから `kumo usage` を実行すると、ブラウザを開かずに成功し、
   `login.json` の `session.refreshedAt` が新しくなる
 - 期待: `Start-Job { kumo usage }` などで 2 つを同時に実行しても両方成功し、`login.json` が JSON として読める
 - 期待: `cf zero-trust access applications revoke-tokens <app-id>` で取り消し、約 1 分後に `kumo usage` を実行すると、`login_required`（「`kumo login` を
   実行してください」）で終了コード 1 になる。`kumo login` でまた使えるようになる。（この操作はほかの PC の許可も消す）
-- 期待: 許可の期間（今の設定では 24 時間、#9 の後は 1 週間）を過ぎてから `kumo usage` を実行すると `login_required` になる。ログインからの期間か、
+- 期待: 許可の期間（1 週間。検証用の値では 24 時間）を過ぎてから `kumo usage` を実行すると `login_required` になる。ログインからの期間か、
   最後の更新からの期間かを記録する（research L2 の未確認）
 - 期待: `kumo usage --json` などの出力に、`oauth:` で始まる値が現れない
 
