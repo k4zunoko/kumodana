@@ -43,7 +43,8 @@
   判定（サービストークンを識別できず、ローカルでのテストも難しい）。
 - **2026-10-21 注記**: [003 の research](../003-cli-login/research.md) L1・L10 で、CLI はブラウザでのログイン（Access の Managed OAuth）でも
   所有者として通るようにした。Access がトークンを所有者の JWT（`email` 入り）に変えて渡すので、Worker の判定は変えていない。
-  サービストークンの経路も残している（残すかどうかは Issue #10 で決める）。
+  サービストークンの経路も残している（残すかどうかは Issue #10 で決める）。2026-10-21 注記: #10 で、退路として残し、
+  シークレットは PC に置かないと決めた（docs/runbook.md §3・§7）。この節の判定（`common_name` が CLI のクライアント ID）は変わらない。
 - **注意**: Public Suffix List には `workers.dev` が登録されているため、`meshnode.workers.dev` 全体が 1 つの
   サイトになる。管理用と配信用は同一サイトで、SameSite Cookie による防御は効かない（R6 で対処）。
 
