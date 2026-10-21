@@ -16,6 +16,8 @@ export type Resolved = {
 	serviceToken?: { values: Partial<CliConfig>; missing: string[] };
 	/** The login record when it was read (always, for `login`). */
 	login?: LoginRecord;
+	/** config.json is malformed; set only with `tolerateConfigErrors`, which reads it as empty instead of failing. */
+	configInvalid?: boolean;
 };
 
 function present(value: unknown): boolean {
@@ -35,20 +37,32 @@ export function hasConfigServiceToken(file: Record<string, unknown>): boolean {
  * Decides the method from the conditions only; missing values do not fail here (review item 1). Management
  * operations turn missing service-token values into `config_missing`; `kumo login --status` lists them as notes.
  */
-export async function resolveCredentials(ctx: CliContext, options: { readLogin?: boolean } = {}): Promise<Resolved> {
+export async function resolveCredentials(
+	ctx: CliContext,
+	options: { readLogin?: boolean; tolerateConfigErrors?: boolean } = {},
+): Promise<Resolved> {
 	const configPath = configFilePath(ctx.env, ctx.platform);
 	const loginPath = loginFilePath(ctx.env, ctx.platform);
-	const base = { configPath, loginPath };
+	const base: Pick<Resolved, "configPath" | "loginPath" | "configInvalid"> = { configPath, loginPath };
+	const readConfig = async () => {
+		try {
+			return await readConfigFile(ctx.env, ctx.platform);
+		} catch (error) {
+			if (!options.tolerateConfigErrors || !(error instanceof CliError) || error.code !== "config_invalid") throw error;
+			base.configInvalid = true;
+			return {};
+		}
+	};
 
 	if (hasEnvServiceToken(ctx.env)) {
-		const file = await readConfigFile(ctx.env, ctx.platform);
-		const login = options.readLogin ? await readLogin(loginPath, ctx.urls) : undefined;
+		const file = await readConfig();
+		const login = options.readLogin ? await readLogin(loginPath, ctx.urls, ctx.loginFs) : undefined;
 		return { ...base, method: "env_service_token", serviceToken: collectConfig(ctx.env, file), login };
 	}
-	const login = await readLogin(loginPath, ctx.urls);
+	const login = await readLogin(loginPath, ctx.urls, ctx.loginFs);
 	if (login?.session) return { ...base, method: "login", login };
 
-	const file = await readConfigFile(ctx.env, ctx.platform);
+	const file = await readConfig();
 	if (hasConfigServiceToken(file)) {
 		return { ...base, method: "config_service_token", serviceToken: collectConfig(ctx.env, file), login };
 	}
