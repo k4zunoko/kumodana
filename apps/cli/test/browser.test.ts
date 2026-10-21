@@ -20,6 +20,15 @@ describe("opening the browser (research L7)", () => {
 		expect(windowsDir({ SystemRoot: " " })).toBe(String.raw`C:\Windows`);
 	});
 
+	it("does not trust a SystemRoot that is not an absolute path (it would bring back the current-folder lookup)", () => {
+		for (const root of ["", " ", "Windows", String.raw`.\Windows`, String.raw`C:Windows`, ".."]) {
+			expect(windowsDir({ SystemRoot: root })).toBe(String.raw`C:\Windows`);
+			expect(openerCommand("x", "win32", { SystemRoot: root })[0]).toBe(String.raw`C:\Windows\System32\rundll32.exe`);
+			expect(fileOpenerCommand("x", "win32", { SystemRoot: root })[0]).toBe(String.raw`C:\Windows\explorer.exe`);
+		}
+		expect(windowsDir({ SystemRoot: String.raw` D:\WINNT ` })).toBe(String.raw`D:\WINNT`);
+	});
+
 	it("starts explorer.exe for kumo preview by absolute path too", () => {
 		expect(fileOpenerCommand(String.raw`C:\tmp\a&b.html`, "win32", { SystemRoot: String.raw`C:\Windows` })).toEqual([
 			String.raw`C:\Windows\explorer.exe`,
