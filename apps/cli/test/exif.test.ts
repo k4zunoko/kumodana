@@ -1,14 +1,27 @@
-import { copyFile, mkdtemp, readFile, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exiftool } from "exiftool-vendored";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { endExiftool, stripMetadata } from "../src/exif.ts";
 
 afterAll(endExiftool);
 
+const workDirs: string[] = [];
+
+// Remove the working copies. Windows may keep a file busy for a moment (a virus scanner, for example); a folder that
+// still cannot be removed is left behind, because cleanup must never fail a test.
+afterEach(async () => {
+	await Promise.all(
+		workDirs
+			.splice(0)
+			.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined)),
+	);
+});
+
 async function workingCopy(name: string): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "kumo-exif-test-"));
+	workDirs.push(dir);
 	const path = join(dir, name);
 	await copyFile(new URL(`./fixtures/${name}`, import.meta.url), path);
 	return path;
