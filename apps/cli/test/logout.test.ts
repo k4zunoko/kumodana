@@ -66,7 +66,12 @@ describe("kumo logout (specs/003-cli-login contracts/cli.md, #8)", () => {
 	it("prints JSON with --json", async () => {
 		const { dir, before } = await loggedIn();
 		const { captured } = await runLogout(dir, { json: true });
-		expect(JSON.parse(captured.stdout.join("\n"))).toEqual({ loggedOut: true, revoked: true, adminUrl: before.adminUrl });
+		expect(JSON.parse(captured.stdout.join("\n"))).toEqual({
+			loggedOut: true,
+			revoked: true,
+			alreadyInvalid: false,
+			adminUrl: before.adminUrl,
+		});
 	});
 
 	it("still clears the session when the revocation fails, then exits with revoke_failed (review item 10)", async () => {
@@ -74,13 +79,72 @@ describe("kumo logout (specs/003-cli-login contracts/cli.md, #8)", () => {
 		server!.options.revokeFails = true;
 		const { code, captured } = await runLogout(dir, { json: true });
 		expect(code).toBe(1);
-		expect(JSON.parse(captured.stdout.join("\n"))).toEqual({ loggedOut: true, revoked: false, adminUrl: before.adminUrl });
+		expect(JSON.parse(captured.stdout.join("\n"))).toEqual({
+			loggedOut: true,
+			revoked: false,
+			alreadyInvalid: false,
+			adminUrl: before.adminUrl,
+		});
 		const error = JSON.parse(captured.stderr.at(-1) ?? "{}") as { error: { code: string; hint: string } };
 		expect(error.error.code).toBe("revoke_failed");
 		expect(error.error.hint).toContain("revoke-tokens");
 		expect(error.error.hint).toContain("users revoke");
 		expect((await readLogin(loginPath(dir), TEST_URLS))?.session).toBeNull();
 		for (const token of server!.issued) expect(allOutput(captured)).not.toContain(token);
+	});
+
+	it("treats an already invalid grant (Access answers 400 invalid_grant) as done, with exit code 0 (T035)", async () => {
+		const { dir, before } = await loggedIn();
+		server!.revokeAll();
+		const { code, captured } = await runLogout(dir);
+		expect(code).toBe(0);
+		expect(captured.stdout).toEqual([`ログアウトしました: ${before.adminUrl}（この PC の許可はすでに無効でした）`]);
+		expect(captured.stderr.join("\n")).not.toContain("revoke_failed");
+		expect(captured.stderr.join("\n")).not.toContain("取り消せませんでした");
+		expect((await readLogin(loginPath(dir), TEST_URLS))?.session).toBeNull();
+		for (const token of server!.issued) expect(allOutput(captured)).not.toContain(token);
+	});
+
+	it("says alreadyInvalid in JSON for a token Access does not know (expired grant)", async () => {
+		const { dir, before } = await loggedIn();
+		await writeLogin(loginPath(dir), { ...before, session: { ...before.session!, refreshToken: "oauth:rt-expired-grant" } });
+		const { code, captured } = await runLogout(dir, { json: true });
+		expect(code).toBe(0);
+		expect(JSON.parse(captured.stdout.join("\n"))).toEqual({
+			loggedOut: true,
+			revoked: true,
+			alreadyInvalid: true,
+			adminUrl: before.adminUrl,
+		});
+		expect(captured.stderr).toEqual([]);
+	});
+
+	it("also accepts RFC 7009's 200 for an already revoked token", async () => {
+		const { dir } = await loggedIn();
+		server!.options.revokeInvalidAnswer = "ok";
+		server!.revokeAll();
+		const { code, captured } = await runLogout(dir);
+		expect(code).toBe(0);
+		expect(captured.stdout[0]).toContain("この PC の許可を取り消しました");
+	});
+
+	it("keeps revoke_failed for errors other than invalid_grant, and says it once", async () => {
+		for (const revokeError of [
+			{ status: 503, error: "temporarily_unavailable" },
+			{ status: 400, error: "invalid_client" },
+		]) {
+			const { dir } = await loggedIn();
+			server!.options.revokeError = revokeError;
+			const { code, captured } = await runLogout(dir);
+			expect(code).toBe(1);
+			const error = captured.stderr.find((line) => line.startsWith("エラー:")) ?? "";
+			expect(error).toBe(
+				`エラー: この PC の許可を取り消せませんでした（${revokeError.error}: ${revokeError.error} (test)）。許可は期間が切れるまで有効です。`,
+			);
+			expect(captured.stderr.join("\n")).toContain("（revoke_failed）");
+			await server!.close();
+			server = undefined;
+		}
 	});
 
 	it("still clears the session when the network is down", async () => {
@@ -118,7 +182,12 @@ describe("kumo logout (specs/003-cli-login contracts/cli.md, #8)", () => {
 		expect(code).toBe(0);
 		expect(captured.stdout).toEqual(["ログインしていません。"]);
 		const json = await runLogout(dir, { json: true });
-		expect(JSON.parse(json.captured.stdout.join("\n"))).toEqual({ loggedOut: false, revoked: false, adminUrl: null });
+		expect(JSON.parse(json.captured.stdout.join("\n"))).toEqual({
+			loggedOut: false,
+			revoked: false,
+			alreadyInvalid: false,
+			adminUrl: null,
+		});
 	});
 
 	it("succeeds with nothing to do after a logout", async () => {

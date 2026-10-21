@@ -155,6 +155,29 @@ describe("kumo login (specs/003-cli-login contracts/cli.md)", () => {
 		expect(server.revocations).toEqual([first.session?.refreshToken]);
 	});
 
+	it("logs in again without a warning when the previous grant is already invalid (T035)", async () => {
+		server = await mockAuthServer();
+		const dir = await tempConfigHome();
+		await runLogin(dir, server.url);
+		server.revokeAll();
+		const { code, captured } = await runLogin(dir, undefined);
+		expect(code).toBe(0);
+		expect(captured.stderr.join("\n")).not.toContain("前のログインの許可");
+		expect(captured.stdout[0]).toContain("ログインしました");
+	});
+
+	it("warns once, without doubled words, when revoking the previous grant fails", async () => {
+		server = await mockAuthServer();
+		const dir = await tempConfigHome();
+		await runLogin(dir, server.url);
+		server.options.revokeError = { status: 503, error: "temporarily_unavailable" };
+		const { code, captured } = await runLogin(dir, undefined);
+		expect(code).toBe(0);
+		expect(captured.stderr).toContain(
+			"警告: 前のログインの許可を取り消せませんでした（temporarily_unavailable: temporarily_unavailable (test)）。許可の期間が切れるまで有効です。",
+		);
+	});
+
 	it("registers again for a different admin URL", async () => {
 		server = await mockAuthServer();
 		const dir = await tempConfigHome();

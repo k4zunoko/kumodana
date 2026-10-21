@@ -13,6 +13,7 @@ import {
 	type Discovery,
 	discover,
 	exchangeCode,
+	failureReason,
 	OAuthError,
 	registerClient,
 	revokeToken,
@@ -231,19 +232,19 @@ export async function login(runtime: Runtime, argument: string | undefined, opti
 		});
 	}
 
-	// Revoke the grant this login replaces, after the new one is saved (research L13).
+	// Revoke the grant this login replaces, after the new one is saved (research L13). A grant that is already invalid
+	// (its period ended, or it was revoked) needs nothing and gets no warning (T035).
 	let revokedPrevious = false;
 	if (previous?.session) {
 		try {
-			await revokeToken(
+			const result = await revokeToken(
 				previous.endpoints.revocation,
 				{ token: previous.session.refreshToken, clientId: previous.client.clientId },
 				ctx.fetchImpl,
 			);
-			revokedPrevious = true;
+			revokedPrevious = result === "revoked";
 		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			printWarning(out, `前のログインの許可を取り消せませんでした（${reason}）。許可の期間が切れるまで有効です。`);
+			printWarning(out, `前のログインの許可を取り消せませんでした（${failureReason(error)}）。許可の期間が切れるまで有効です。`);
 		}
 	}
 

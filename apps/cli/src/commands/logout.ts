@@ -3,7 +3,7 @@ import { loginFilePath, readConfigFile } from "../config.ts";
 import { hasConfigServiceToken, hasEnvServiceToken } from "../credentials.ts";
 import { CliError, EXIT_USAGE } from "../errors.ts";
 import { type LoginRecord, readLogin, writeLogin } from "../login-store.ts";
-import { revokeToken } from "../oauth.ts";
+import { failureReason, type RevokeResult, revokeToken } from "../oauth.ts";
 import { printError, printResult, printWarning } from "../output.ts";
 import type { Runtime } from "../runtime.ts";
 import type { Register } from "./index.ts";
@@ -36,14 +36,19 @@ export async function logout(runtime: Runtime): Promise<number> {
 
 	const session = record?.session;
 	if (!record || !session) {
-		printResult(out, "ログインしていません。", { loggedOut: false, revoked: false, adminUrl: null });
+		printResult(out, "ログインしていません。", { loggedOut: false, revoked: false, alreadyInvalid: false, adminUrl: null });
 		return 0;
 	}
 	out.secrets.push(session.accessToken, session.refreshToken);
 
+	let result: RevokeResult | undefined;
 	let revokeError: unknown;
 	try {
-		await revokeToken(record.endpoints.revocation, { token: session.refreshToken, clientId: record.client.clientId }, ctx.fetchImpl);
+		result = await revokeToken(
+			record.endpoints.revocation,
+			{ token: session.refreshToken, clientId: record.client.clientId },
+			ctx.fetchImpl,
+		);
 	} catch (error) {
 		revokeError = error;
 	}
@@ -56,7 +61,9 @@ export async function logout(runtime: Runtime): Promise<number> {
 			code: "login_write_failed",
 			hint: revokeError
 				? `許可も取り消せていません。${path} を削除してください。${REVOKE_HINT}`
-				: `許可は取り消しました。${path} を削除してください。`,
+				: result === "already_invalid"
+					? `許可はすでに無効でした。${path} を削除してください。`
+					: `許可は取り消しました。${path} を削除してください。`,
 		});
 	}
 
@@ -70,21 +77,26 @@ export async function logout(runtime: Runtime): Promise<number> {
 		if (hasConfigServiceToken(file)) printWarning(out, "今後は config.json のサービストークンで管理操作が行われます。");
 	}
 
-	const revoked = revokeError === undefined;
+	// `revoked`: the grant can no longer be used, whether this logout ended it or it had already ended (its period
+	// passed, or it was revoked; Access then answers invalid_grant, T035). `alreadyInvalid` tells the two apart.
+	const revoked = result !== undefined;
+	const alreadyInvalid = result === "already_invalid";
 	printResult(
 		out,
-		revoked
-			? `ログアウトしました: ${record.adminUrl}（この PC の許可を取り消しました）`
-			: `ログアウトしました: ${record.adminUrl}（この PC の資格情報を消しました。許可は取り消せていません）`,
-		{ loggedOut: true, revoked, adminUrl: record.adminUrl },
+		alreadyInvalid
+			? `ログアウトしました: ${record.adminUrl}（この PC の許可はすでに無効でした）`
+			: revoked
+				? `ログアウトしました: ${record.adminUrl}（この PC の許可を取り消しました）`
+				: `ログアウトしました: ${record.adminUrl}（この PC の資格情報を消しました。許可は取り消せていません）`,
+		{ loggedOut: true, revoked, alreadyInvalid, adminUrl: record.adminUrl },
 	);
 	if (revoked) return 0;
 
-	// Like `kumo rm` when the cache purge fails: the work is done, then exit code 1 (review item 10).
-	const reason = revokeError instanceof Error ? revokeError.message : String(revokeError);
+	// Like `kumo rm` when the cache purge fails: the work is done, then exit code 1 (review item 10). Only failures
+	// that may leave the grant alive get here: network errors, 5xx, and errors other than invalid_grant.
 	return printError(
 		out,
-		new CliError(`この PC の許可を取り消せませんでした（${reason}）。許可は期間が切れるまで有効です。`, {
+		new CliError(`この PC の許可を取り消せませんでした（${failureReason(revokeError)}）。許可は期間が切れるまで有効です。`, {
 			code: "revoke_failed",
 			hint: REVOKE_HINT,
 		}),

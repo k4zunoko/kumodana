@@ -29,6 +29,13 @@ export type AuthServerOptions = {
 	omitRefreshTokenOnRefresh?: boolean;
 	/** The revocation endpoint answers 500. */
 	revokeFails?: boolean;
+	/** The revocation endpoint answers with this status and OAuth error, whatever the token. */
+	revokeError?: { status: number; error: string };
+	/**
+	 * How the revocation endpoint answers a token whose grant is revoked or unknown. Access answers
+	 * `400 invalid_grant` ("Invalid refresh token", T035), which is the default; `"ok"` is RFC 7009's 200.
+	 */
+	revokeInvalidAnswer?: "invalid_grant" | "ok";
 	/** Replaces fields of the authorization-server metadata. */
 	metadata?: Record<string, unknown>;
 	/** Replaces the protected-resource metadata. */
@@ -256,8 +263,16 @@ export async function mockAuthServer(options: AuthServerOptions = {}): Promise<A
 				tokenError(res, 500, "server_error");
 				return;
 			}
+			if (options.revokeError) {
+				tokenError(res, options.revokeError.status, options.revokeError.error);
+				return;
+			}
 			const grantId = refreshTokens.get(form.get("token") ?? "");
 			const grant = grantId ? grants.get(grantId) : undefined;
+			if ((!grant || grant.revoked) && (options.revokeInvalidAnswer ?? "invalid_grant") === "invalid_grant") {
+				sendJson(res, 400, { error: "invalid_grant", error_description: "Invalid refresh token" });
+				return;
+			}
 			if (grant) grant.revoked = true;
 			res.writeHead(200);
 			res.end();

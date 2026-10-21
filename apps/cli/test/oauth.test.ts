@@ -187,3 +187,31 @@ describe("token requests (research L8・L12)", () => {
 		expect(error.code).toBe("login_failed");
 	});
 });
+
+describe("revoking (research L12, T035)", () => {
+	function answering(status: number, body: unknown): typeof fetch {
+		return async () => new Response(body === undefined ? null : JSON.stringify(body), { status });
+	}
+	const endpoint = "https://team.example.invalid/cdn-cgi/access/oauth/revoke";
+	const params = { token: "oauth:rt-x", clientId: "client-1" };
+
+	it("returns revoked for 200", async () => {
+		await expect(revokeToken(endpoint, params, answering(200, undefined))).resolves.toBe("revoked");
+	});
+
+	it("returns already_invalid for Access's 400 invalid_grant (a revoked or expired grant)", async () => {
+		const answer = answering(400, { error: "invalid_grant", error_description: "Invalid refresh token" });
+		await expect(revokeToken(endpoint, params, answer)).resolves.toBe("already_invalid");
+	});
+
+	it.each([
+		[400, "invalid_client"],
+		[503, "temporarily_unavailable"],
+		[500, "invalid_grant"],
+	])("fails with revoke_failed for %i %s, naming the reason once", async (status, error) => {
+		const failure = (await revokeToken(endpoint, params, answering(status, { error })).catch((e: unknown) => e)) as OAuthError;
+		expect(failure).toBeInstanceOf(OAuthError);
+		expect(failure.code).toBe("revoke_failed");
+		expect(failure.reason).toBe(error);
+	});
+});
