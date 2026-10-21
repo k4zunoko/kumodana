@@ -66,7 +66,7 @@ Worker のテストは変更しない
 | V. コストには上限を設ける | Access の Managed OAuth は Zero Trust の Free プランで使える（L2）。Worker の処理は増えない（トークンの確かめは Access が行う） | PASS |
 | VI. 重要な経路は自動テストで守る | 管理用 Worker の認証は変えず、既存の workerd のテストで守られたまま。CLI のログイン・更新・取り消し・出力から隠すことは、偽の認可サーバーを使った CLI のテストで守る（L16） | PASS |
 | VII. 小さく保つ | 依存を増やさない。外部サービスは既存の Access の機能（Managed OAuth）を使うだけで、追加の理由と退路を research L1 に記録した。Managed OAuth はベータで版を固定できないため、使えなくなったときはサービストークン（環境変数・`config.json`）で使い続ける。CLI はエンドポイントをメタデータから得て、URL を決め打ちしない。なお、憲法の「ベータ版のツールは版を完全に固定する」はツールを想定した文言で、版を固定できないベータの機能の扱いは書かれていない。「固定できないベータの機能は、退路を記録して使う」と明記する改正は、#10 を決めるときか次の PATCH の改正で行う（PR #11 のレビューの指摘 13。この PR では改正しない） | PASS |
-| 技術・運用上の制約 | Access の設定（Managed OAuth）は手順書に残す必要がある。#4 で検証用の値のまま有効にしてあり、今の値と設定の手順（GET → PUT → 差分の確認）は research L2 に記録した。最終的な値と手順は #9 で runbook §6 に書く（tasks の Phase 8）。設定は `cf zero-trust access applications update --body` かダッシュボードで行い、`cf` は今の版（1.0.0-beta.13）のまま | PASS（#9 で手順書を更新するまで、本番の設定が手順書より先行している点を tasks で追う） |
+| 技術・運用上の制約 | Access の設定（Managed OAuth）は手順書に残す必要がある。#4 で検証用の値のまま有効にしてあり、今の値と設定の手順（GET → PUT → 差分の確認）は research L2 に記録した。最終的な値と手順は #9 で runbook §6 に書いた（tasks の Phase 8。2026-10-21 に本番の値を 15 分・1 週間にし、手順書と一致した）。設定は `cf zero-trust access applications update --body` かダッシュボードで行い、`cf` は今の版（1.0.0-beta.13）のまま | PASS（#9 で手順書を更新するまで、本番の設定が手順書より先行している点を tasks で追う） |
 
 **Phase 1 後の再確認**: data-model（Worker 側の変更なし、`login.json` の追加）と contracts（CLI の設定・`login`・`logout`・案内、管理 API の 1 段目の追加）を
 確認し、違反はない。001 の FR-031（入口と本体の 2 か所での確認）と FR-033（資格情報を出力しない）にも合う。
