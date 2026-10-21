@@ -35,7 +35,7 @@ Worker のテストは変更しない
 
 **Target Platform**: 所有者の Windows PC（CLI）。macOS と Linux でも動くようにする。社内プロキシの内側でも使う
 
-**Project Type**: CLI ＋ 2 つの Web サービス（npm workspaces のモノレポ）。今回変えるのは CLI だけ（運用の手順書は #9 で変える）
+**Project Type**: CLI ＋ 2 つの Web サービス（npm workspaces のモノレポ）。今回変えるのは CLI と、その使い方の文書（README、runbook の §6 以外）。Access の設定値と runbook §6 は #9 で変える
 
 **Performance Goals**: ブラウザでのログインの待ち時間を除き、`kumo login` は数秒で終わる。新しい PC でのインストールから最初の管理操作まで 3 分以内（SC-001）。
 期限前の更新は管理操作 1 回あたり最大 1 往復を足すだけ
@@ -117,8 +117,8 @@ apps/cli/
     ├── login.test.ts        # 新規
     └── logout.test.ts       # 新規
 
-docs/runbook.md                                   # #9: §3・§6・§7・§10・検証の記録
-README.md                                         # #9: 使い方に kumo login
+docs/runbook.md                                   # 実装の PR: §3・§7・§10。#9: §6（Access の設定値と手順）・検証の記録
+README.md                                         # 実装の PR: 使い方に kumo login・logout
 specs/001-share-shelf-mvp/contracts/cli.md        # 注記: 設定は 003 で置き換えた
 specs/001-share-shelf-mvp/contracts/admin-api.md  # 注記: 認証の 1 段目に 003 の経路
 specs/001-share-shelf-mvp/research.md             # 注記: R3 に 003 の経路
@@ -131,8 +131,10 @@ specs/001-share-shelf-mvp/research.md             # 注記: R3 に 003 の経路
 サービストークンの経路は今の `loadConfig` と案内をそのまま包むので、既存のテストは変えずに通る。各部品は `fetch` とブラウザを開く関数を差し替えられるようにし、
 偽の認可サーバーでテストする。
 
-作業は Issue に合わせて分ける（tasks.md）: #6（ログイン）、#7（保存・更新・管理操作への組み込み）、#8（ログアウト）は実装の PR で、
-#9（Access の設定、runbook・README、本番での確認）はその後に行う。#10（サービストークンを残すか）はこの仕様の範囲外。
+作業は Issue に合わせて分ける（tasks.md）: #6（ログイン）、#7（保存・更新・管理操作への組み込み）、#8（ログアウト）は実装の PR で行い、
+README と runbook（§6 を除く）の利用者向けの更新もこの PR に含める（tasks の Phase 7）。機能をマージした時点で、main の文書が新しいコマンドに
+追いついているようにするため。#9（Access の最終的な値の設定、runbook §6 の設定手順、本番での確認の記録）はその後に行う（Phase 8）。
+#10（サービストークンを残すか）はこの仕様の範囲外。
 
 ## Complexity Tracking
 

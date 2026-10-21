@@ -174,7 +174,7 @@
 
 | `code` | 条件 | 終了コード |
 |---|---|---|
-| `revoke_failed` | 取り消しに失敗した（通信の失敗、エラーの応答）。資格情報は消してある。案内: 許可は期間まで有効なこと、取り消す方法（runbook の `cf zero-trust access applications revoke-tokens <app-id>` と `cf zero-trust access users revoke --email <owner>`。どちらもほかの PC の許可も消える） | `1` |
+| `revoke_failed` | 取り消しに失敗した（通信の失敗、エラーの応答）。資格情報は消してある。案内: 許可は期間まで有効なこと、取り消す方法（runbook §7 の `cf zero-trust access applications revoke-tokens <app-id>` と `cf zero-trust access users revoke --email <owner>`。どちらもほかの PC の許可も消える） | `1` |
 | `login_invalid` | `login.json` が壊れている。案内: `login.json` を削除してよいこと、許可を取り消す方法（上と同じ） | `2` |
 
 ## エラーの案内の変更（すべてのコマンド。research L11）

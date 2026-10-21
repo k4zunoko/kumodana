@@ -19,7 +19,7 @@ description: "Task list for 003-cli-login"
 - **[P]**: Can run in parallel (different files, no dependencies)
 - **[Story]**: Which user story this task belongs to (US1〜US4)
 - パスはリポジトリのルートからの相対パス（plan.md の Project Structure に従う）
-- 各フェーズに、対応する Issue（#6〜#9）を書く。Phase 1〜7 は実装の PR（#6〜#8）、Phase 8 はその後の運用の作業（#9）
+- 各フェーズに、対応する Issue（#6〜#9）を書く。Phase 1〜7 は実装の PR（#6〜#8。README と runbook の §6 以外の更新を含む）、Phase 8 はその後の運用の作業（#9。Access の設定値と runbook §6、本番での確認の記録）
 - 変えないもの: `apps/admin/**`、`apps/files/**`、`apps/admin/migrations/**`、`packages/shared/**`、`apps/cli/package.json` の依存
 - 個人を特定できる値（サブドメイン、チーム名、メールアドレス、各種 ID、AUD）とトークンの値を、コード・テスト・文書・コミットに含めない
 
@@ -133,25 +133,27 @@ description: "Task list for 003-cli-login"
 
 ## Phase 7: Polish & Cross-Cutting Concerns（実装の PR、#6〜#8）
 
+**Purpose**: 仕上げと、利用者向けの文書（README、runbook の §6 以外）の更新。実装の PR をマージした時点で、main の文書が新しいコマンドに追いついているようにする
+
 - [ ] T027 [P] `apps/cli/src/main.ts` の説明文と、`kumo login`・`kumo logout` のヘルプの文を整える
 - [ ] T028 [P] `specs/001-share-shelf-mvp/contracts/cli.md`（「設定」）、`specs/001-share-shelf-mvp/contracts/admin-api.md`（「認証（2 段）」）、`specs/001-share-shelf-mvp/research.md`（R3）に、003 で経路を加えたことを日付付きで注記する
-- [ ] T029 `npm run typecheck` と `npm test` を実行し、すべて成功することを確かめる
-- [ ] T030 `git diff --stat main -- apps/admin apps/files packages/shared` が空で、`apps/cli/package.json` の依存が変わっていないことを確かめる（FR-022、憲法 VII）
-- [ ] T031 Windows で、`&` を含む 500 文字程度の URL が `openUrl` で既定のブラウザにそのまま渡ることを確かめる（research L7 の実装時の確認事項。偽のサーバーの URL を使う）
-- [ ] T032 （所有者が実施）本番での quickstart §2（US1〜US4、既存の経路）を PR の確認時に行う。#4 から移した確認（アクセストークンの期限切れの応答、許可の期間切れの応答と期間の起点、ほかの PC の許可に影響しないこと、古いリフレッシュトークンでの取り消し）の結果を、PR と #3 に記録する（research L2 の未確認）
+- [ ] T029 `docs/runbook.md` §7 を `npm install -g ./apps/cli` → `kumo login <adminUrl>` → `kumo usage` の流れに書き直す。`kumo login --status`、許可の期限が切れたとき（`kumo login`）、PC をなくしたとき（`cf zero-trust access applications revoke-tokens <app-id>` はアプリのすべての許可を、`cf zero-trust access users revoke --email <owner>` は所有者のすべてのセッションを消す。どちらもサービストークンには影響しない。ダッシュボードには「Revoke existing tokens」が見当たらない）を書く。許可の期間などの Access の設定値は §7 に書かず、§6 を参照する（値と設定の手順は #9 の T037 で §6 に書く）。環境変数のサービストークンの説明は #10 の結論に合わせる（まだ決まっていなければ、今の位置づけ（予備）で書き、#10 で直す）
+- [ ] T030 `docs/runbook.md` §3・§7・§10 のサービストークンの記述の食い違い（シークレットの保管方針、`refresh` と `rotate`）を、ログインが主でサービストークンは予備という位置づけに合わせて直す（T029 と同じファイルなので、T029 の後に行う）
+- [ ] T031 [P] `README.md` の「使い方」に `kumo login`、`kumo login --status`、`kumo logout` を加え、初期設定の参照先を更新する
+- [ ] T032 `npm run typecheck` と `npm test` を実行し、すべて成功することを確かめる
+- [ ] T033 `git diff --stat main -- apps/admin apps/files packages/shared` が空で、`apps/cli/package.json` の依存が変わっていないことを確かめる（FR-022、憲法 VII）
+- [ ] T034 Windows で、`&` を含む 500 文字程度の URL が `openUrl` で既定のブラウザにそのまま渡ることを確かめる（research L7 の実装時の確認事項。偽のサーバーの URL を使う）
+- [ ] T035 （所有者が実施）本番での quickstart §2（US1〜US4、既存の経路）を PR の確認時に行う。#4 から移した確認（アクセストークンの期限切れの応答、許可の期間切れの応答と期間の起点、ほかの PC の許可に影響しないこと、古いリフレッシュトークンでの取り消し）の結果を、PR と #3 に記録する（research L2 の未確認）
 
 ---
 
 ## Phase 8: 運用（#9。実装の PR のマージ後）
 
-**Purpose**: Access の最終的な設定、手順書と README の更新、本番での確認の記録（憲法の「Cloudflare 側の設定は手順書に残す」）
+**Purpose**: Access の最終的な設定と、その値・手順の runbook §6 への記載、本番での確認の記録（憲法の「Cloudflare 側の設定は手順書に残す」）
 
-- [ ] T033 （所有者が実施）ダッシュボードの `kumodana-admin` の Advanced settings で、Managed OAuth のアクセストークンの有効期間を 15 分（既定）、グラントセッション期間を 1 週間（選択肢になければ 1 週間以下でいちばん長い値）にして保存する（research L3）。その後 `cf zero-trust access applications get <app-id>` で `oauth_configuration` を確かめ、実際に入った値を控える
-- [ ] T034 `docs/runbook.md` §6 に Managed OAuth の設定（値とその理由、ダッシュボードの手順、`cf zero-trust access applications update --body` の手順と PUT で全体を送る注意、ダッシュボードで選択肢にない値は空欄と表示され保存し直すと変わるおそれ）を加える
-- [ ] T035 `docs/runbook.md` §7 を `npm install -g ./apps/cli` → `kumo login <adminUrl>` → `kumo usage` の流れに書き直す。`kumo login --status`、許可の期限が切れたとき（`kumo login`）、PC をなくしたとき（`cf zero-trust access applications revoke-tokens <app-id>` はアプリのすべての許可を、`cf zero-trust access users revoke --email <owner>` は所有者のすべてのセッションを消す。どちらもサービストークンには影響しない。ダッシュボードには「Revoke existing tokens」が見当たらない）を書く。環境変数のサービストークンの説明は #10 の結論に合わせる（まだ決まっていなければ、今の位置づけ（予備）で書き、#10 で直す）
-- [ ] T036 `docs/runbook.md` §3・§7・§10 のサービストークンの記述の食い違い（シークレットの保管方針、`refresh` と `rotate`）を、ログインが主でサービストークンは予備という位置づけに合わせて直す
-- [ ] T037 [P] `README.md` の「使い方」に `kumo login`、`kumo login --status`、`kumo logout` を加え、初期設定の参照先を更新する
-- [ ] T038 本番での確認の結果（T032 と、T033 の設定後の 15 分・1 週間での動き）を `docs/runbook.md` の検証の記録に残す（個人を特定できる値は書かない）
+- [ ] T036 （所有者が実施）ダッシュボードの `kumodana-admin` の Advanced settings で、Managed OAuth のアクセストークンの有効期間を 15 分（既定）、グラントセッション期間を 1 週間（選択肢になければ 1 週間以下でいちばん長い値）にして保存する（research L3）。その後 `cf zero-trust access applications get <app-id>` で `oauth_configuration` を確かめ、実際に入った値を控える
+- [ ] T037 `docs/runbook.md` §6 に Managed OAuth の設定（T036 で入った値とその理由、ダッシュボードの手順、`cf zero-trust access applications update --body` の手順と PUT で全体を送る注意、ダッシュボードで選択肢にない値は空欄と表示され保存し直すと変わるおそれ）を加える
+- [ ] T038 本番での確認の結果（T035 と、T036 の設定後の 15 分・1 週間での動き）を `docs/runbook.md` の検証の記録に残す（個人を特定できる値は書かない）
 
 ---
 
@@ -162,8 +164,8 @@ description: "Task list for 003-cli-login"
 - **Setup (Phase 1)**: 依存なし
 - **Foundational (Phase 2)**: Setup の後。すべてのストーリーの前提（`login.json`、資格情報の選択、`AdminApi` の方法）
 - **User Stories (Phase 3〜6)**: Foundational の後
-- **Polish (Phase 7)**: Phase 3〜6 の後。ここまでが実装の PR（#6〜#8）
-- **運用 (Phase 8)**: 実装の PR のマージ後（#9）。T033 は所有者が行い、T034〜T038 はその値を使う
+- **Polish (Phase 7)**: Phase 3〜6 の後。ここまでが実装の PR（#6〜#8）。README と runbook（§6 を除く）の利用者向けの更新もここで行う
+- **運用 (Phase 8)**: 実装の PR のマージ後（#9）。T036 は所有者が行い、T037・T038 はその値を使う
 
 ### User Story Dependencies
 
@@ -182,7 +184,7 @@ description: "Task list for 003-cli-login"
 - T003 と T005 はファイルが違うので並行できる（T004・T006・T007 は順に）
 - T008・T009・T010、T011・T012・T013 はそれぞれ並行できる
 - T016・T017・T018 は並行できる
-- Polish の T027・T028 は並行できる。Phase 8 の T037 は T034〜T036 と並行できる
+- Phase 7 の T027・T028・T031 は並行できる。T029 と T030 は同じ `docs/runbook.md` を変えるので順に行う
 
 ---
 
@@ -218,6 +220,8 @@ Task: "apps/cli/src/commands/login.ts に kumo login を実装する"
 3. US3: ログアウトで許可を手放せる
 4. US4: どの資格情報が使われるか確かめられる
 5. どの段階でも、サービストークンの経路は変わらない。Managed OAuth が使えなくなっても、サービストークンで使い続けられる
+6. 実装の PR の最後（Phase 7）で、README と runbook（§6 を除く）を新しいコマンドに合わせる。機能をマージした時点で、main の文書が追いついている
+7. マージの後（Phase 8、#9）で、Access の最終的な値を設定し、runbook §6 の設定手順と、本番での確認の記録を書く
 
 ---
 
