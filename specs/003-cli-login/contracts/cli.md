@@ -19,8 +19,8 @@
   `kumo login --status` は、足りない項目を誤りにせず `notes` に出す。
 - `config.json` は CLI が書き換えない。ログインの記録は同じフォルダーの `login.json` に保存する（[data-model.md](../data-model.md)）。
 - URL は末尾の `/` を除いて比べる。
-- `login.json` は、読み込みが `EPERM`・`EACCES`・`EBUSY` で失敗したら 50・100・200 ミリ秒待って最大 3 回やり直す（Windows で、ほかの `kumo` が
-  置き換えている最中に起こりうる）。それでも読めなければ `login_read_failed`（終了コード `1`）。`login_invalid`（終了コード `2`）にするのは、
+- `login.json` は、読み込みも置き換えも、`EPERM`・`EACCES`・`EBUSY` で失敗したら 50・100・200・400・800・1,000 ミリ秒の間隔で最大 6 回（合計で約 2.5 秒）やり直す（Windows で、ほかの `kumo` が
+  置き換えている最中や、書いた直後のファイルをウイルス対策などが開いているときに起こりうる。PR #12 のレビュー）。それでも読めなければ `login_read_failed`（終了コード `1`）。`login_invalid`（終了コード `2`）にするのは、
   JSON や形式の誤りだけ（レビューの指摘 5）。
 - 資格情報（サービストークンのシークレット、アクセストークン、リフレッシュトークン）は、どの出力（`--json` を含む）やエラーにも表示しない。
 - 社内プロキシは、今と同じく `NODE_USE_ENV_PROXY=1` と `HTTPS_PROXY` に従う。ブラウザからの受け取りは `127.0.0.1` なので、プロキシを通らない。
@@ -29,7 +29,8 @@
 
 1. 管理 API を呼ぶ前に、アクセストークンの期限まで 60 秒を切っていれば更新し、`login.json` を置き換える（research L8・L9）。書く前に `login.json` を
    読み直し、`adminUrl` と `session.loggedInAt` が読み込んだときと同じ場合だけ書く。その間に `kumo login` や `kumo logout` が記録を変えていたら、
-   書かずに、手元の新しいトークンでこの操作だけを続ける（レビューの指摘 4）
+   書かずに、手元の新しいトークンでこの操作だけを続ける（レビューの指摘 4）。この先回りの更新が一時的な理由（`network_error`・`refresh_failed`）で
+   失敗し、アクセストークンの期限がまだ過ぎていなければ、警告を出して今のトークンで送る（PR #12 のレビュー）
 2. `Authorization: Bearer <アクセストークン>` と `X-Kumodana-Client: cli` を付けて送る（サービストークンのヘッダーは送らない）
 3. 401 が返ったら、1 回だけ更新して同じ要求をやり直す。やり直しても 401 なら `login_required`
 4. 更新が拒否されたら（`invalid_grant`・`invalid_client`・`unauthorized_client`）、`login.json` を読み直し、ほかの `kumo` が書いた新しい
@@ -55,7 +56,8 @@
    ```
 
 6. ブラウザからの応答を待つ（最長 5 分）。`state` が一致する `code` を受け取ったら、完了のページを返して待ち受けを閉じる
-7. コードをトークンに交換し、`login.json` の `adminUrl`・`resource`・`endpoints`・`client`・`session` を置き換える
+7. コードをトークンに交換し、`login.json` の `adminUrl`・`resource`・`endpoints`・`client`・`session` を置き換える。保存できなかったときは、
+   新しいリフレッシュトークンをできる範囲で取り消してから `login_write_failed` で終わる（PR #12 のレビュー）
 8. 前の `session` があれば、そのリフレッシュトークンを取り消す（失敗したら警告）
 9. 新しいアクセストークンで `GET /api/usage` を呼び、結果を表示する。手順 8 で前の許可を取り消した後に、ここが `login_required` で失敗したときは、
    取り消しが新しい許可にも効いた可能性がある。「`kumo logout` の後に `kumo login` を実行してください」と案内する（前の `session` がなければ、
@@ -106,7 +108,7 @@
 | `login_timeout` | 5 分以内にブラウザからの応答がない。案内: 所有者のアカウントでログインしたか確かめる。ブラウザにクライアント（client）のエラーが表示された場合は、この PC の登録が使えなくなっているので、`login.json` を削除してから `kumo login` を実行する（レビューの指摘 3） | `1` |
 | `login_denied` | ブラウザからの応答が `error`（`access_denied` など）。`error` と `error_description` を表示する | `1` |
 | `login_failed` | コードの交換が拒否された（`invalid_grant` など）、応答にリフレッシュトークンがない。交換が `invalid_client` のときは 1 回だけ登録し直してからログインをやり直す。自動で登録し直すのはこの場合だけ（認可の画面での `invalid_client` は、RFC 6749 §4.1.2.1 のとおりブラウザに表示され、CLI には届かない） | `1` |
-| `login_write_failed` | `login.json` に保存できない | `1` |
+| `login_write_failed` | `login.json` に保存できない（やり直しの後も）。交換の後なら、新しい許可をできる範囲で取り消してある。案内: もう一度 `kumo login` を実行する。取り消せたかどうかも示す | `1` |
 | `login_read_failed` | `login.json` を読めない（上の「設定」） | `1` |
 | `network_error` | 通信の失敗（001 と同じ） | `1` |
 
@@ -116,8 +118,9 @@
 
 ## `kumo login --status`（新規）
 
-管理操作に使われる方法と、ログインの状態を表示する。管理 API にも認可サーバーにも接続しない（spec FR-020）。終了コードは常に `0`
-（`login.json` が壊れているときだけ `login_invalid`、終了コード `2`）。
+管理操作に使われる方法と、ログインの状態を表示する。管理 API にも認可サーバーにも接続しない（spec FR-020）。終了コードは `0`。
+例外は、`login.json` が壊れているとき（`login_invalid`、終了コード `2`）と、やり直しても `login.json` を読めないとき（`login_read_failed`、
+終了コード `1`）だけ。`config.json` が壊れていても誤りにせず、`config.json` がないものとして方法を決め、`notes` に出す（PR #12 のレビュー）。
 
 ### 出力（人向け）
 

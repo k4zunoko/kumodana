@@ -185,13 +185,15 @@
 ## L7. ブラウザの起動
 
 - **Decision**: 認可の URL を、まず標準エラー出力に表示し、続けて既定のブラウザで開く。シェルを通さずに起動する（`spawn`、`shell: false`）。
-  - Windows: `rundll32.exe url.dll,FileProtocolHandler <url>`
+  - Windows: `%SystemRoot%\System32\rundll32.exe url.dll,FileProtocolHandler <url>`（絶対パスで起動する。`SystemRoot` がなければ `C:\Windows`）
   - macOS: `open <url>`、それ以外: `xdg-open <url>`
   - 起動に失敗しても（コマンドがないなど）、URL は表示済みなので、そのまま待つ。`--no-open` のときは開かずに待つ。
   - 開く関数は差し替え可能にし、テストでは「ブラウザと Access の役」をする関数に替える。
 - **Rationale**: `cmd /c start` は URL の `&` をシェルの区切りとして解釈し、URL が途中で切れる。シェルを通さなければ `&` は文字のまま渡る。
   `rundll32 url.dll,FileProtocolHandler` は、URL を既定のブラウザで開くために広く使われている方法（Go の `pkg/browser` など）。
-  `kumo preview` はファイルを開くため `explorer.exe` を使っているが、そちらは変えない。
+  `kumo preview` はファイルを開くため `explorer.exe` を使っている。こちらも絶対パス（`%SystemRoot%\explorer.exe`）で起動するようにした。
+  - 絶対パスにするのは、Windows の Node.js（libuv）が、パスのないコマンド名を PATH より先に**今のフォルダー**から探すため。
+    `kumo` を実行したフォルダーに `rundll32.exe` という名前のファイルがあると、所有者の権限でそれが動く（CWE-427。PR #12 のレビュー）。
 - **Alternatives considered**: `cmd /c start`（`&` の問題）、`explorer.exe <url>`（URL も開けるが、引数を独自の規則で解釈する）、
   PowerShell の `Start-Process`（起動が遅い）、npm の `open`（依存が増える）。
 - **実装時の確認事項**: Windows で、`&` を含む長い URL（500 文字程度）がそのまま既定のブラウザに渡ることを確かめる。
@@ -204,7 +206,9 @@
   - 更新: `grant_type=refresh_token`、`refresh_token`、`client_id`、`resource` を送る。応答に `refresh_token` があれば置き換え、なければ前のものを使い続ける。
   - アクセストークンの期限は「受け取った時刻 ＋ `expires_in`」として保存する。
   - 更新の時期:
-    1. 管理 API を呼ぶ前に、期限まで 60 秒を切っていれば更新する
+    1. 管理 API を呼ぶ前に、期限まで 60 秒を切っていれば更新する。この先回りの更新が一時的な理由（`network_error`・`refresh_failed`）で失敗し、
+       アクセストークンの期限がまだ過ぎていなければ、警告を出して今のトークンで送る（PR #12 のレビュー）。許可が消えているとき（`login_required`）は
+       そのまま失敗にする
     2. 管理 API が 401 を返したら（`WWW-Authenticate: Bearer` か Worker の `unauthenticated`）、1 回だけ更新して同じ要求をやり直す
        （送る本文はバイト列か JSON で、もう一度送れる）。やり直しても 401 なら `login_required`
   - 更新が `invalid_grant`・`invalid_client`・`unauthorized_client` で拒否されたら、`login.json` を読み直す。ほかの `kumo` が新しいリフレッシュトークンを
@@ -231,9 +235,13 @@
   - 形式は [data-model.md](./data-model.md)。平文の JSON。
   - 書き込みは、同じフォルダーの一時ファイル（`login.json.<乱数>.tmp`）に書いてから `rename` で置き換える。途中で止まっても、`login.json` は前の内容か
     新しい内容のどちらかになる。
-  - Windows で置き換えが `EPERM`・`EACCES`・`EBUSY` で失敗したら（ほかのプログラムが開いているなど）、50・100・200 ミリ秒待って最大 3 回やり直す。それでも失敗したら、
-    一時ファイルを消し、警告を出して処理は続ける（前のリフレッシュトークンも使える。L2）。
-  - 読み込みも、`EPERM`・`EACCES`・`EBUSY` なら同じ間隔で最大 3 回やり直す。Windows では、ほかの `kumo` が置き換えている最中の読み込みが失敗しうる
+  - Windows で置き換えが `EPERM`・`EACCES`・`EBUSY` で失敗したら（ほかのプログラムが開いている、書いた直後のファイルをウイルス対策などが開いているなど）、
+    50・100・200・400・800・1,000 ミリ秒の間隔で最大 6 回（合計で約 2.5 秒）やり直す。それでも失敗したら、一時ファイルを消す。アクセストークンの更新のときは、
+    警告を出して処理を続ける（前のリフレッシュトークンも使える。L2）。`kumo login` の交換の後のときは、新しいリフレッシュトークンをできる範囲で
+    取り消してから `login_write_failed` で終わる（記録のない許可を残さないため）。
+  - 最初は 50・100・200 ミリ秒（合計 350 ミリ秒）だったが、Windows で、同じファイルへの書き込みと置き換えを続けると、置き換えられるまで最長で
+    約 750 ミリ秒かかり、テストと `kumo login` が失敗しうることが分かった（PR #12 のレビュー）。
+  - 読み込みも、`EPERM`・`EACCES`・`EBUSY` なら同じ間隔でやり直す。Windows では、ほかの `kumo` が置き換えている最中の読み込みが失敗しうる
     ため（レビューの指摘 5）。それでも失敗したら `login_read_failed`（終了コード 1）。`login_invalid`（終了コード 2）にするのは、JSON や形式の
     誤りだけ。
   - Windows 以外では、フォルダーを作るときは 700、一時ファイルは 600 で作る（置き換えた後の `login.json` も 600 になる）。
@@ -309,7 +317,8 @@
 ## L14. 出力から隠す値
 
 - **Decision**: アクセストークンとリフレッシュトークンを、読み込んだときと更新したときに `out.secrets` に加える（`redact` で `[REDACTED]` に置き換わる）。
-  認可コード、`code_verifier`、`state` は出力に使わない。認可の URL（`state` と `code_challenge` を含む）は表示する。
+  認可コード、`code_verifier`、`state` は出力に使わない。認可コードは、交換のエラーの説明に含まれた場合に備えて、受け取った直後に `out.secrets` にも
+  加える（PR #12 のレビュー）。認可の URL（`state` と `code_challenge` を含む）は表示する。
   トークンの要求のエラーは、応答の `error` と `error_description` だけを表示し、要求の本文は表示しない。
 - **Rationale**: 今のサービストークンのシークレットと同じ仕組みで、表示の経路をすべて覆える（001 の FR-033）。認可の URL は秘密ではなく、ブラウザを
   開けないときに所有者が使う。
@@ -325,6 +334,7 @@
 | トークンが別のサーバーに送られる | アクセストークンはログインした `adminUrl` にだけ送る（L10）。リフレッシュトークンは、ログイン時に得た `token_endpoint` と `revocation_endpoint` にだけ送り、転送に従わない（L8） |
 | `login.json` が漏れる | 許可の期間（1 週間）が切れるか取り消すまで、リフレッシュトークンが使われうる（再利用できるため。L2）。対処は `kumo logout`、または API での取り消し（アプリ単位・ユーザー単位）。Windows 以外は 600（L9） |
 | プロセスの一覧から見える | コマンドの引数にトークンを渡さない。ブラウザに渡す URL は秘密を含まない |
+| 今のフォルダーに置かれたプログラムが動く | Windows でブラウザを開くプログラム（`rundll32.exe`、`kumo preview` の `explorer.exe`）は、`SystemRoot` の下の絶対パスで起動する（L7。CWE-427） |
 | Managed OAuth を有効にしたことによる影響 | ブラウザ以外への応答が 302 から 401 に変わるだけで、ブラウザでのログインとサービストークンは変わらない（L2）。配信用 Worker と閲覧者には関係しない |
 
 ## L16. テスト

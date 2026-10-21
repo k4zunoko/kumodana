@@ -38,8 +38,8 @@ description: "Task list for 003-cli-login"
 
 **Purpose**: ログインの記録の保存、資格情報の選択、`AdminApi` の方法の切り替え（#7。#6 の確かめにも要る）
 
-- [X] T003 [P] `apps/cli/test/login-store.test.ts` を書く（data-model の `login.json`）: 書いて読める、ファイルがなければ「記録なし」、`"version"` が `1` 以外・JSON でない・必須の項目（`adminUrl`、`resource`、`endpoints` の 4 つ、`client.clientId`、`client.registeredAt`）がない・型が違う、`session` の `accessToken`・`refreshToken`・`accessTokenExpiresAt`・`loggedInAt` が空でない文字列でない・日時として読めない場合は `login_invalid`（終了コード 2、資格情報の値をメッセージに含めない）、`adminUrl` は末尾の `/` を除いた形で `https:` だけ、`endpoints` もすべて `https:` だけ（ループバックの `http:` は、検証の関数に許す指定を渡したときだけ通る）、読み込みが `EPERM`・`EACCES`・`EBUSY` のときはやり直し、続けば `login_read_failed`（終了コード 1）、`session` を `null` にすると `adminUrl`・`endpoints`・`client` が残る、書き込みは一時ファイルから置き換える（途中で失敗しても前の内容が残る）、`rename` が `EPERM`・`EACCES`・`EBUSY` で失敗し続けたら一時ファイルを消して「保存できなかった」を返す（例外にしない）、Windows 以外ではファイルが 600・新しく作るフォルダーが 700
-- [X] T004 `apps/cli/src/login-store.ts` を実装する（research L9、data-model の「読み込みの検証」「読み込みのエラー」「URL の検証」）: `readLogin`（読み込みもやり直す）、`writeLogin`（同じフォルダーの `login.json.<乱数>.tmp` に書いて `rename`。`EPERM`・`EACCES`・`EBUSY` なら 50・100・200 ミリ秒待って最大 3 回やり直す）、`clearSession`
+- [X] T003 [P] `apps/cli/test/login-store.test.ts` を書く（data-model の `login.json`）: 書いて読める、ファイルがなければ「記録なし」、`"version"` が `1` 以外・JSON でない・必須の項目（`adminUrl`、`resource`、`endpoints` の 4 つ、`client.clientId`、`client.registeredAt`）がない・型が違う、`session` の `accessToken`・`refreshToken`・`accessTokenExpiresAt`・`loggedInAt` が空でない文字列でない・日時として読めない場合は `login_invalid`（終了コード 2、資格情報の値をメッセージに含めない）、`adminUrl` は末尾の `/` を除いた形で `https:` だけ、`endpoints` もすべて `https:` だけ（ループバックの `http:` は、検証の関数に許す指定を渡したときだけ通る）、読み込みが `EPERM`・`EACCES`・`EBUSY` のときはやり直し、続けば `login_read_failed`（終了コード 1）、`session` を `null` にすると `adminUrl`・`endpoints`・`client` が残る、書き込みは一時ファイルから置き換える（途中で失敗しても前の内容が残る）、`rename` が `EPERM`・`EACCES`・`EBUSY` で失敗し続けたら一時ファイルを消して `login_write_failed` を投げる（アクセストークンの更新の側で警告に変える。`kumo login` の側では新しい許可を取り消して終わる）、Windows 以外ではファイルが 600・新しく作るフォルダーが 700
+- [X] T004 `apps/cli/src/login-store.ts` を実装する（research L9、data-model の「読み込みの検証」「読み込みのエラー」「URL の検証」）: `readLogin`（読み込みもやり直す）、`writeLogin`（同じフォルダーの `login.json.<乱数>.tmp` に書いて `rename`。`EPERM`・`EACCES`・`EBUSY` なら 50・100・200・400・800・1,000 ミリ秒の間隔で最大 6 回やり直す。PR #12 のレビューで 3 回から延ばした）。session の削除は専用の関数を作らず、`writeLogin(path, { ...record, session: null })` で行う
 - [X] T005 [P] `apps/cli/test/credentials.test.ts` に資格情報の選択のテストを書く（research L10、contracts/cli.md の「設定」）: 環境変数 `KUMODANA_CLIENT_ID` か `KUMODANA_CLIENT_SECRET` の一方でもあれば `env_service_token`（今の `loadConfig` と同じ組み合わせと `config_missing`）、次に `login.json` に `session` があれば `login`（URL は `login.json` の `adminUrl`。`KUMODANA_ADMIN_URL` が末尾の `/` を除いて違えば `admin_url_mismatch`、終了コード 2）、次に `config.json` に `clientId` か `clientSecret` があれば `config_service_token`、どれもなければ `none`（管理操作は `config_missing`、終了コード 2、`kumo login <adminUrl>` を案内）。方法は条件だけで決め、サービストークンの値が足りなくても選択は失敗させず、足りない項目の名前の一覧（`missing`）を返す（管理操作は今と同じ `config_missing`。レビューの指摘 1）。`config.json` の `adminUrl` が `login.json` と違っても `login` は誤りにしない
 - [X] T006 `apps/cli/src/credentials.ts` に `resolveCredentials(env, platform)`（方法を決めるだけで、値の不足では失敗しない）と、方法ごとの「ヘッダーを作る・隠す値を返す」部品を実装する（サービストークン: 今の `CF-Access-Client-Id`・`CF-Access-Client-Secret`、ログイン: `Authorization: Bearer`。更新は Phase 4 で足す）
 - [X] T007 `apps/cli/src/api.ts` と `apps/cli/src/runtime.ts` を、方法を受け取る形に変える。サービストークンの経路の振る舞いと案内（`AUTH_HINT`、`access_login_required`、`access_denied`）は変えない。`RuntimeOptions.loadConfig` の差し替え口は残し、既存の `apps/cli/test/*.test.ts` が変更なしで通ることを確かめる。読み込んだ資格情報（シークレット、アクセストークン、リフレッシュトークン）を `out.secrets` に加える
@@ -64,7 +64,7 @@ description: "Task list for 003-cli-login"
 
 - [X] T011 [P] [US1] `apps/cli/src/oauth.ts` に、探索、動的登録、PKCE と `state`、認可の URL、コードの交換、取り消し（RFC 7009。前の許可の取り消しと `kumo logout` が使う）を実装する（research L4〜L6・L8・L12。`fetch` を差し替え可能にし、トークンの要求は `redirect: "error"`）
 - [X] T012 [P] [US1] `apps/cli/src/loopback.ts` に受け取りの待ち受けを実装する（research L6。時間切れの上限を差し替え可能にする）
-- [X] T013 [P] [US1] `apps/cli/src/browser.ts` に `openUrl` を実装する（research L7。Windows は `rundll32.exe url.dll,FileProtocolHandler <url>`、macOS は `open`、それ以外は `xdg-open`。`spawn` でシェルを通さない）
+- [X] T013 [P] [US1] `apps/cli/src/browser.ts` に `openUrl` を実装する（research L7。Windows は `SystemRoot` の下の `System32` にある `rundll32.exe` を絶対パスで起動し、引数は `url.dll,FileProtocolHandler <url>`（PR #12 のレビューで絶対パスにした。CWE-427）、macOS は `open`、それ以外は `xdg-open`。`spawn` でシェルを通さない）
 - [X] T014 [US1] `apps/cli/src/commands/login.ts` に `kumo login [<adminUrl>] [--no-open]` を実装する（contracts/cli.md の手順 1〜9。待ち受けの後に登録する。登録の保存の時期は research L5、確かめの失敗の退路は research L13、前の許可は新しいトークンの保存後に取り消し、最後に新しいトークンで `GET /api/usage`。開く関数と時間切れの上限は差し替え可能にする）
 - [X] T015 [US1] `apps/cli/src/commands/index.ts` に `registerLogin` を加える（`usage` の後）
 
@@ -106,7 +106,7 @@ description: "Task list for 003-cli-login"
 
 ### Implementation for User Story 3
 
-- [X] T023 [US3] `apps/cli/src/commands/logout.ts` に `kumo logout` を実装する（research L12。取り消しは T011 の `oauth.ts` を使う。成否にかかわらず `clearSession`）
+- [X] T023 [US3] `apps/cli/src/commands/logout.ts` に `kumo logout` を実装する（research L12。取り消しは T011 の `oauth.ts` を使う。成否にかかわらず `writeLogin(path, { ...record, session: null })` で session を消す）
 - [X] T024 [US3] `apps/cli/src/commands/index.ts` に `registerLogout` を加える（`login` の後）
 
 **Checkpoint**: ログアウトで、この PC の許可がすぐ使えなくなる
@@ -121,11 +121,11 @@ description: "Task list for 003-cli-login"
 
 ### Tests for User Story 4 ⚠️
 
-- [X] T025 [P] [US4] `apps/cli/test/login.test.ts` に `--status` のテストを書く（contracts/cli.md の `kumo login --status`）: 4 つの方法の表示と `--json` の `method`・`adminUrl`・`login`・`notes`、方法がログインでないときの「使われていない記録」、`config.json` と `login.json` の `adminUrl` の食い違いの知らせ、環境変数のサービストークンが不完全なとき（`KUMODANA_CLIENT_ID` だけ）も方法は `env_service_token` で、足りない項目の名前が `notes` に出て終了コード 0（レビューの指摘 1）、`KUMODANA_ADMIN_URL` がログインした URL と違うときの知らせ、`fetch` を呼ばない、終了コード 0（壊れた `login.json` だけ `login_invalid`、終了コード 2）、`<adminUrl>` や `--no-open` と同時に使うと `invalid_argument`（終了コード 2）、トークンが現れない
+- [X] T025 [P] [US4] `apps/cli/test/login.test.ts` に `--status` のテストを書く（contracts/cli.md の `kumo login --status`）: 4 つの方法の表示と `--json` の `method`・`adminUrl`・`login`・`notes`、方法がログインでないときの「使われていない記録」、`config.json` と `login.json` の `adminUrl` の食い違いの知らせ、環境変数のサービストークンが不完全なとき（`KUMODANA_CLIENT_ID` だけ）も方法は `env_service_token` で、足りない項目の名前が `notes` に出て終了コード 0（レビューの指摘 1）、`KUMODANA_ADMIN_URL` がログインした URL と違うときの知らせ、`fetch` を呼ばない、`config.json` が壊れていても `notes` に出して終了コード 0（PR #12 のレビュー）、終了コード 0（壊れた `login.json` は `login_invalid`、終了コード 2。読めない `login.json` は `login_read_failed`、終了コード 1）、`<adminUrl>` や `--no-open` と同時に使うと `invalid_argument`（終了コード 2）、トークンが現れない
 
 ### Implementation for User Story 4
 
-- [X] T026 [US4] `apps/cli/src/commands/login.ts` に `--status` を実装する（`resolveCredentials` と `readLogin` だけを使い、足りない項目は `notes` に出す。日時はローカル時刻、`--json` は ISO 8601）
+- [X] T026 [US4] `apps/cli/src/commands/login.ts` に `--status` を実装する（`resolveCredentials` と `readLogin` だけを使い、足りない項目は `notes` に出す。日時は `kumo ls` と同じ日本時間、`--json` は ISO 8601。`config.json` が壊れていても誤りにせず `notes` に出す）
 
 **Checkpoint**: すべてのストーリーが独立に動く
 
@@ -246,3 +246,14 @@ Task: "apps/cli/src/commands/login.ts に kumo login を実装する"
   - 本番への接続は、確認のためのサービストークンでの `kumo usage`（読み取り）だけ。成功し、`kumo login --status` は `config_service_token` を
     示した。本番の Access での認証（`kumo login` など）は行っていない
   - T035 は本番の Access でのログインが要るため、PR の確認時に所有者が行う
+- PR #12 のレビューへの対応（2026-10-21）:
+  - Windows でブラウザを開くプログラム（`rundll32.exe`、`kumo preview` の `explorer.exe`）を、`SystemRoot`（なければ `C:\Windows`）の下の
+    絶対パスで起動するようにした（今のフォルダーから探されないように。CWE-427）。直した後も、T034 と同じ URL がそのまま届くことを確かめた
+  - `kumo login --status` は、`config.json` が壊れていても `notes` に出して終了コード 0 で終わる。例外は `login_invalid`（2）と
+    `login_read_failed`（1）だけで、契約もそうした
+  - `login.json` の読み込みと置き換えのやり直しを 50・100・200・400・800・1,000 ミリ秒に延ばした。`kumo login` で交換の後に保存できなかった
+    ときは、新しいリフレッシュトークンをできる範囲で取り消してから `login_write_failed` で終わる
+  - 期限前の更新が一時的な理由で失敗し、アクセストークンが期限内なら、警告を出して今のトークンで送る。認可コードも `out.secrets` に加えた。
+    保存できなかったときの警告は、エラーのコード（`EPERM` など）だけを示す
+  - テストが作った一時フォルダーを、各テストの後に消すようにした。偽のブラウザを待つ時間を 15 秒に延ばした（PC が重いときの時間切れを避ける）
+  - `--json` のときの案内（認可の URL など）の形は変えていない（レビューの軽微な指摘 7。必要になったら変える）

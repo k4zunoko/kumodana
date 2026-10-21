@@ -64,7 +64,7 @@ CLI は読むだけ。`clientId` と `clientSecret` はサービストークン�
   - 必須の項目（`adminUrl`、`resource`、`endpoints` の 4 つ、`client.clientId`、`client.registeredAt`）がない、文字列でない、URL の検証に通らない
   - `session` が `null` でもオブジェクトでもない。`session` がオブジェクトのとき、`accessToken`・`refreshToken`・`accessTokenExpiresAt`・`loggedInAt` が
     空でない文字列でない、または日時として読めない。`refreshedAt` はあれば文字列
-- 読み込みのエラー（レビューの指摘 5）: `ENOENT` は「記録なし」。`EPERM`・`EACCES`・`EBUSY` は、50・100・200 ミリ秒待って最大 3 回やり直し、
+- 読み込みのエラー（レビューの指摘 5）: `ENOENT` は「記録なし」。`EPERM`・`EACCES`・`EBUSY` は、50・100・200・400・800・1,000 ミリ秒の間隔で最大 6 回（合計で約 2.5 秒）やり直し、
   それでも失敗したら `login_read_failed`（終了コード 1）。JSON や形式の誤りだけを `login_invalid` にする。
 - URL の検証（レビューの指摘 8）: `adminUrl`・`resource`・`endpoints` は `https:` だけを受け付ける。テストは偽の認可サーバーを `http://127.0.0.1` で
   動かすため、検証の関数に「ループバックの `http:` を許す」指定を渡す。指定は CLI の実行時の設定（`createRuntime` などの差し替え口）からだけ渡せ、
