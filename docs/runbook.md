@@ -44,12 +44,16 @@ npx cf d1 migrations apply <DATABASE_ID> --dir migrations
 npx cf zero-trust access service-tokens create --name kumodana-cli --duration 8760h
 ```
 
-- ふだんの CLI の利用は、ブラウザでのログイン（`kumo login`、§7）で行う。サービストークンは、ブラウザのない環境や、
-  Access の Managed OAuth が使えなくなったときの予備として残している（残すか廃止するかは Issue #10 で決める）
-- 出力の `client_id` は `.secrets.production.json` の `CLI_CLIENT_ID`（§4）に使う。**`client_secret` はこのときしか表示されない**。
-  予備として使う環境の環境変数か `config.json`（§7）にだけ書き、ほかに控えは取らない。失ったときは §7 の `rotate` で再発行する
-- 有効期限（作成から 1 年）をカレンダーなどに記録する。延長（シークレットは変わらない）は
-  `npx cf zero-trust access service-tokens refresh <TOKEN_ID>`
+- ふだんの CLI の利用は、ブラウザでのログイン（`kumo login`、§7）で行う。サービストークンは、ブラウザのない環境で使うときや、
+  Access の Managed OAuth（ベータ）が使えなくなったときの**退路**として残す（Issue #10 の決定、2026-10-21）
+  - 残すもの: Access のサービストークン `kumodana-cli` とポリシー（§6）、管理用 Worker の `CLI_CLIENT_ID`（§4）と CLI の判定、
+    CLI の環境変数と `config.json` の経路。憲法 IV も変えない
+  - ただし、**ふだん使う PC にはシークレットを置かない**。シークレットはどこにも保存しない。退路として使うときに `rotate` で再発行し、
+    使う環境の環境変数に一時的に設定して、使い終わったら消す（§7「サービストークンで使う（退路）」）
+- 出力の `client_id` は `.secrets.production.json` の `CLI_CLIENT_ID`（§4）に使う。**`client_secret` はこのときしか表示されない**が、控えは取らない。
+  要るときは §7 の手順で `rotate` して得る（`client_id` は変わらないので、Worker の再デプロイは要らない）
+- 有効期限（作成から 1 年。今のトークンは 2027-10-16）をカレンダーなどに記録する。退路を残すため、期限の前に延ばす。延長（シークレットは
+  変わらない）は `npx cf zero-trust access service-tokens refresh <TOKEN_ID>`。期限の通知（Expiring Service Token Alert）は自動で作られている（§8）
 
 ## 4. シークレットファイル
 
@@ -238,41 +242,53 @@ kumo usage                   # 使用量が表示されれば設定は完了
   ほかの PC では、次の管理操作が `login_required` になるので、`kumo login` し直す。ダッシュボードには、Worker 単位のアプリの
   「Revoke existing tokens」が見当たらない（2026-10-20 時点）ため、取り消しは上のコマンドで行う
 
-### サービストークンで使う（予備）
+### サービストークンで使う（退路）
 
-ブラウザのない環境や、Managed OAuth が使えなくなったときは、§3 のサービストークンで使う。管理操作に使う資格情報は、次の順に選ばれる。
+ブラウザのない環境で使うときや、Managed OAuth が使えなくなったときは、§3 のサービストークンを、使う環境の環境変数に一時的に設定して使う。
+シークレットはどこにも保存していないので、使うたびに再発行する（Issue #10 の決定、2026-10-21）。
+
+1. シークレットを再発行する。前のシークレットはすぐ使えなくなる
+
+   ```sh
+   npx cf zero-trust access service-tokens list                       # kumodana-cli の <service_token_id> を確認
+   npx cf zero-trust access service-tokens rotate <service_token_id>  # 出力の client_secret は、このときしか表示されない
+   ```
+
+   `client_id`（管理用 Worker の `CLI_CLIENT_ID`）は変わらないので、Worker の再デプロイは要らない
+2. 使う環境で、環境変数を一時的に設定して使う（PowerShell の例。そのシェルの中だけで効く）
+
+   ```powershell
+   $env:KUMODANA_ADMIN_URL = "https://kumodana-admin.<subdomain>.workers.dev"
+   $env:KUMODANA_CLIENT_ID = "<client_id>"
+   $env:KUMODANA_CLIENT_SECRET = "<client_secret>"
+   kumo usage
+   ```
+
+   環境変数のサービストークンは、ログイン（`login.json`）より優先される。`kumo login --status` では「サービストークン（環境変数）」と出る
+3. 使い終わったら、環境変数を消す。シークレットは控えない（次に要るときは、また `rotate` する）
+
+   ```powershell
+   Remove-Item Env:KUMODANA_CLIENT_ID, Env:KUMODANA_CLIENT_SECRET, Env:KUMODANA_ADMIN_URL
+   ```
+
+管理操作に使う資格情報は、次の順に選ばれる。
 
 1. 環境変数 `KUMODANA_CLIENT_ID`・`KUMODANA_CLIENT_SECRET`（どちらか一方でもあれば、ログインより優先される）
 2. ログイン（`login.json`）
 3. `config.json` の `clientId`・`clientSecret`
 
-環境変数（`KUMODANA_ADMIN_URL`・`KUMODANA_CLIENT_ID`・`KUMODANA_CLIENT_SECRET`）か、`%APPDATA%\kumodana\config.json`（Windows）に書く。
-環境変数と `config.json` は項目ごとに組み合わせられ、環境変数が優先される。
-
-```json
-{
-  "adminUrl": "https://kumodana-admin.<subdomain>.workers.dev",
-  "clientId": "<client_id>",
-  "clientSecret": "<client_secret>"
-}
-```
-
-- ログインしている間は、`config.json` の `clientId`・`clientSecret` は使われない。ログインを使う PC では削除してよい
+- `config.json`（Windows では `%APPDATA%\kumodana\config.json`）にシークレットを書く経路も CLI に残っているが、**ふだん使う PC には置かない**
+  （シークレットはどこにも保存しない）。所有者の PC の `config.json` は、2026-10-21 に `clientId`・`clientSecret` を削除し、`adminUrl` だけにした。
+  ほかの PC の `config.json` にシークレットが書いてあれば、削除する（ログインしている間は使われない）
+- `config.json` の `adminUrl` は、`kumo login` で URL を省略したときの候補として使われる
 - ログインを使うときに `KUMODANA_ADMIN_URL` を設定しておく場合は、ログインした URL と同じにする。違うと、トークンを送らずに
   `admin_url_mismatch` で止まる
 
 ### シークレットの保管と再発行
 
-`clientSecret` は発行時に一度しか表示されない。予備として使う環境の環境変数か `config.json` にだけ置き、ほかに控えは取らない（§3）。
-置いたファイルを失ったとき、漏れたとき、期限（2027-10-16）が近いときは、同じトークンのシークレットを再発行する。
-
-```sh
-npx cf zero-trust access service-tokens rotate <service_token_id>   # kumodana-cli の ID は cf zero-trust access service-tokens list で確認
-```
-
-`clientId` は変わらないため、Worker の再デプロイは不要。新しいシークレットで、使う環境の `clientSecret`（または
-`KUMODANA_CLIENT_SECRET`）を書き換え、`kumo usage` で確認する。古いシークレットは使えなくなる。期限を延ばすだけなら、
-シークレットが変わらない §3 の `refresh` を使う。
+`clientSecret` は発行時に一度しか表示されない。**どこにも保存しない**（§3）。要るときは、上の手順で `rotate` して得て、使い終わったら消す。
+漏れたかもしれないときも `rotate` する（前のシークレットはすぐ使えなくなる）。期限（2027-10-16）が近いときは、シークレットが変わらない
+§3 の `refresh` で延ばす。どちらも `clientId` は変わらないため、Worker の再デプロイは要らない。
 
 ## 8. 予算アラートと使用量の通知（憲法 V、FR-038）
 
@@ -306,7 +322,7 @@ npm run resume -w @kumodana/files   # 再開
 | ログインの確認 | `kumo login --status`（使われる資格情報とログインの状態。通信しない）。使えるかは `kumo usage` |
 | ログインし直す | `kumo login`（許可の期間が過ぎたとき、取り消されたとき。§7） |
 | PC の許可を手放す | その PC で `kumo logout`。PC をなくしたときは §7 の `revoke-tokens` か `users revoke` |
-| サービストークンの更新 | 期限の延長は §3 の `refresh`（シークレットは変わらない）。シークレットの再発行は §7 の `rotate`。トークンを作り直した場合は、使う環境の設定と `CLI_CLIENT_ID` を更新して再デプロイ |
+| サービストークンの更新 | 期限（2027-10-16）の前に、§3 の `refresh` で延ばす（シークレットは変わらない。退路を残すため）。シークレットは保存しないので、退路として使うときに §7 の `rotate` で再発行する。トークンを作り直した場合は `CLI_CLIENT_ID` を更新して再デプロイ |
 | Markdown の変換器の更新 | `markdown-it` と `@mdit/plugin-tasklist`（`apps/cli` の依存）のセキュリティ修正は、公開から 7 日経ってから `npm install -w kumodana-cli --save-exact markdown-it@<版>` で上げ、`npm test` を通して `npm install -g ./apps/cli` し直す。Worker のデプロイは要らない。置いた文書は自動では変わらない（置き直すと別のファイルになる） |
 
 ## 11. 検証の記録（research.md の確認事項。001 の T030・T082、003 の T038）
@@ -382,7 +398,7 @@ T035 は、所有者の PC で `APPDATA` を一時フォルダーに向けて行
 | SC-003 | `kumo logout` で許可が取り消され、`session` は `null` になった（URL と登録は残る）。直後の `kumo usage` は `config_missing`。ログアウト前の記録を戻すと、期限前のアクセストークンでも `login_required` |
 | SC-005 | 古いリフレッシュトークンで取り消した後、最新の記録での `kumo usage` は `login_required`（「`kumo login` を実行してください」） |
 | すでに無効な許可での `kumo logout` | 最初の実装は `revoke_failed`（終了コード 1）で「許可は期間が切れるまで有効です」と誤って案内した。Access が `400 invalid_grant` を返すためで、PR #12 で「この PC の許可はすでに無効でした」（終了コード 0）に直した。2 回目の `kumo logout` は「ログインしていません。」（終了コード 0） |
-| SC-007 | `APPDATA` を元に戻すと、`config.json` のサービストークンで `kumo usage` が成功した。ブラウザらしい要求は、今までどおり Access のログイン画面へ 302 |
+| SC-007 | `APPDATA` を元に戻すと、`config.json` のサービストークンで `kumo usage` が成功した（T035 の時点。その後、#10 の決定で `config.json` からシークレットを削除した）。ブラウザらしい要求は、今までどおり Access のログイン画面へ 302 |
 | 最終的な値（T036） | 新しい値でログインすると、アクセストークンの期限は発行から 15 分だった。`kumo usage` は成功し、`kumo logout` は「この PC の許可を取り消しました」で終了コード 0 |
 
 ## 13. 既知の問題
