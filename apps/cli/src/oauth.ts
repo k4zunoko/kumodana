@@ -15,12 +15,22 @@ export type TokenSet = { accessToken: string; refreshToken?: string; expiresIn: 
 export class OAuthError extends CliError {
 	readonly error: string;
 	readonly status: number;
+	/** `error` and `error_description` alone, for messages that already say what failed. */
+	readonly reason: string;
 
 	constructor(status: number, error: string, description: string | undefined, message: string, code: string) {
-		super(`${message}（${error}${description ? `: ${description}` : ""}）`, { code });
+		const reason = `${error}${description ? `: ${description}` : ""}`;
+		super(`${message}（${reason}）`, { code });
 		this.error = error;
 		this.status = status;
+		this.reason = reason;
 	}
+}
+
+/** A short reason for a message that already says what failed: OAuth's error, or the message of other errors. */
+export function failureReason(error: unknown): string {
+	if (error instanceof OAuthError) return error.reason;
+	return error instanceof Error ? error.message : String(error);
 }
 
 /** Keeps a server-provided string printable and short before it reaches the terminal. */
@@ -239,12 +249,19 @@ export async function refreshTokens(
 	return tokensFrom(response, "アクセストークンを更新できませんでした", "refresh_failed");
 }
 
-/** RFC 7009. Revoking the refresh token ends the whole grant, access tokens included (research L2). */
+/** `revoked`: this request ended the grant. `already_invalid`: the grant was already revoked or expired. */
+export type RevokeResult = "revoked" | "already_invalid";
+
+/**
+ * RFC 7009. Revoking the refresh token ends the whole grant, access tokens included (research L2). Access answers a
+ * token whose grant is already revoked or expired with `400 invalid_grant`, not RFC 7009's 200 (T035); that means
+ * the grant is gone, not that revoking failed. Anything else (network errors, 5xx, other errors) is `revoke_failed`.
+ */
 export async function revokeToken(
 	endpoint: string,
 	params: { token: string; clientId: string },
 	fetchImpl: typeof fetch,
-): Promise<void> {
+): Promise<RevokeResult> {
 	const response = await postForm(
 		endpoint,
 		{ token: params.token, token_type_hint: "refresh_token", client_id: params.clientId },
@@ -252,7 +269,9 @@ export async function revokeToken(
 	);
 	if (response.status === 200) {
 		await response.body?.cancel();
-		return;
+		return "revoked";
 	}
-	throw await errorFrom(response, "許可を取り消せませんでした", "revoke_failed");
+	const error = await errorFrom(response, "許可を取り消せませんでした", "revoke_failed");
+	if (error.status === 400 && error.error === "invalid_grant") return "already_invalid";
+	throw error;
 }
