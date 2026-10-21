@@ -129,7 +129,7 @@
 ```
 
 - `方法` は `ログイン（login.json）`、`サービストークン（環境変数）`、`サービストークン（config.json）`、`なし` のいずれか。
-- 日時はローカル時刻で表示する。
+- 日時は `kumo ls`・`kumo link ls` と同じ形式（日本時間）で表示する。
 - 方法がログインでなくても、`login.json` に `session` があれば、その内容を「ログインの記録（使われていません）」として表示する。
 - `なし` のときは `kumo login <adminUrl>` を案内する。
 - `config.json` の `adminUrl` が `login.json` の `adminUrl` と違うときは、そのことを知らせる（誤りにはしない）。

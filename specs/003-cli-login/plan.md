@@ -94,6 +94,7 @@ specs/003-cli-login/
 ```text
 apps/cli/
 ├── src/
+│   ├── context.ts           # 新規（実装時に追加）: 外部との接点（環境変数、時計、fetch、ブラウザ、URL の検証、待ち受け）をまとめ、テストで差し替える
 │   ├── config.ts            # 変更: login.json のパス（loginFilePath）。既存の loadConfig はサービストークンの経路としてそのまま使う
 │   ├── login-store.ts       # 新規: login.json の読み込みと検証、一時ファイルからの置き換え、権限、session の削除
 │   ├── oauth.ts             # 新規: 探索、動的登録、PKCE と state、認可の URL、交換、更新、取り消し（fetch だけ）
@@ -102,16 +103,18 @@ apps/cli/
 │   ├── credentials.ts       # 新規: 資格情報の選択（L10）と、方法ごとのヘッダー・更新・保存・隠す値
 │   ├── api.ts               # 変更: 資格情報の方法を受け取り、401 で 1 回だけ更新してやり直す。案内を方法で出し分ける（L11）
 │   ├── runtime.ts           # 変更: 資格情報の選択から AdminApi を作る（既存のテスト用の差し替え口は残す）
-│   ├── main.ts              # 変更: 説明文
+│   ├── main.ts              # 変更: ヘルプの末尾の案内
 │   └── commands/
 │       ├── login.ts         # 新規: kumo login [<adminUrl>] [--no-open] [--status]
 │       ├── logout.ts        # 新規: kumo logout
 │       └── index.ts         # 変更: login と logout の登録
 └── test/
-    ├── helpers.ts           # 変更: 偽の認可サーバー兼管理 API、一時の設定フォルダー
+    ├── auth-server.ts       # 新規（実装時に helpers.ts から分けた）: 偽の認可サーバー兼管理 API、一時の設定フォルダー、ログインの記録の見本
+    ├── config.test.ts       # 変更: login.json のパス
     ├── login-store.test.ts  # 新規
     ├── oauth.test.ts        # 新規
     ├── loopback.test.ts     # 新規
+    ├── browser.test.ts      # 新規（実装時に追加）: ブラウザを開くコマンドと引数
     ├── credentials.test.ts  # 新規
     ├── api.test.ts          # 変更: Bearer、更新とやり直し、案内の出し分け（既存の期待は変えない）
     ├── login.test.ts        # 新規
