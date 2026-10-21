@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, resolve, win32 } from "node:path";
 import type { Command } from "commander";
+import { windowsDir } from "../browser.ts";
 import { CliError, EXIT_USAGE } from "../errors.ts";
 import { formatBytes, printResult, printWarning } from "../output.ts";
 import { KIND_LABELS, parseAs, prepare } from "../prepare.ts";
@@ -21,14 +22,23 @@ export type PreviewOptions = {
 /** Opens a file with the default browser. */
 export type Opener = (path: string) => Promise<void>;
 
+/**
+ * The platform's opener for a file. On Windows it is started by absolute path (`%SystemRoot%\explorer.exe`), not by a
+ * bare name that Windows would first look up in the current folder (CWE-427).
+ */
+export function fileOpenerCommand(
+	path: string,
+	platform: string = process.platform,
+	env: Record<string, string | undefined> = process.env,
+): [string, string[]] {
+	if (platform === "win32") return [win32.join(windowsDir(env), "explorer.exe"), [path]];
+	if (platform === "darwin") return ["open", [path]];
+	return ["xdg-open", [path]];
+}
+
 /** Starts the platform's opener without a shell, so that `&` and similar characters in paths are harmless. */
 export const openInBrowser: Opener = (path) => {
-	const [command, args] =
-		process.platform === "win32"
-			? ["explorer.exe", [path]]
-			: process.platform === "darwin"
-				? ["open", [path]]
-				: ["xdg-open", [path]];
+	const [command, args] = fileOpenerCommand(path);
 	return new Promise((resolvePromise, reject) => {
 		const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
 		child.once("error", reject);
