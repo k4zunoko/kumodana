@@ -44,7 +44,12 @@ const nodeFs: LoginFs = {
 
 /** Errors that mean "another process has the file open" on Windows (research L9). */
 const BUSY = new Set(["EPERM", "EACCES", "EBUSY"]);
-const RETRY_DELAYS_MS = [50, 100, 200];
+
+/**
+ * Waits between attempts, about 2.5 seconds in all. On Windows a file written a moment ago can stay locked (by a virus
+ * scanner, for example) for several hundred milliseconds; 350 milliseconds in all was not enough (PR #12 review).
+ */
+export const RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1000];
 
 async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
 	for (let attempt = 0; ; attempt++) {
@@ -174,6 +179,7 @@ export async function readLogin(path: string, policy: UrlPolicy, fs: LoginFs = n
 			code: "login_read_failed",
 			hint: "ほかの kumo が書き換えている最中かもしれません。時間をおいて再実行してください。",
 			exitCode: EXIT_FAILED,
+			details: { errno: code ?? "unknown" },
 		});
 	}
 	return parseLogin(text, path, policy);
@@ -196,6 +202,7 @@ export async function writeLogin(path: string, record: LoginRecord, fs: LoginFs 
 		throw new CliError(`ログインの記録を保存できませんでした（${code ?? "不明なエラー"}）: ${path}`, {
 			code: "login_write_failed",
 			exitCode: EXIT_FAILED,
+			details: { errno: code ?? "unknown" },
 		});
 	}
 }

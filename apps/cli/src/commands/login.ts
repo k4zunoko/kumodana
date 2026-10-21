@@ -104,7 +104,7 @@ async function obtainTokens(
 				// Without a session there is nothing to keep consistent: save at once, so a timeout does not cost another
 				// registration that can never be deleted (research L5).
 				if (!previous?.session) {
-					await writeLogin(path, { version: 1, adminUrl, ...discovery, client, session: null });
+					await writeLogin(path, { version: 1, adminUrl, ...discovery, client, session: null }, ctx.loginFs);
 				}
 			}
 
@@ -179,7 +179,7 @@ export async function login(runtime: Runtime, argument: string | undefined, opti
 	const path = loginFilePath(ctx.env, ctx.platform);
 	let previous: LoginRecord | undefined;
 	try {
-		previous = await readLogin(path, ctx.urls);
+		previous = await readLogin(path, ctx.urls, ctx.loginFs);
 	} catch (error) {
 		if (!(error instanceof CliError) || error.code !== "login_invalid") throw error;
 		printWarning(out, "ログインの記録が壊れているため、作り直します（この PC は登録し直します）。");
@@ -207,7 +207,27 @@ export async function login(runtime: Runtime, argument: string | undefined, opti
 		},
 	};
 	out.secrets.push(tokens.accessToken, tokens.refreshToken);
-	await writeLogin(path, record);
+	try {
+		await writeLogin(path, record, ctx.loginFs);
+	} catch (error) {
+		// Without a saved record nobody can use or revoke this grant later: revoke it now, as far as possible.
+		let revoked = false;
+		try {
+			await revokeToken(discovery.endpoints.revocation, { token: tokens.refreshToken, clientId: client.clientId }, ctx.fetchImpl);
+			revoked = true;
+		} catch {
+			// reported in the hint below
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		throw new CliError(message, {
+			code: "login_write_failed",
+			hint:
+				(revoked
+					? "今回のログインの許可は取り消しました。"
+					: "今回のログインの許可は取り消せませんでした（許可の期間が切れるまで残ります）。") +
+				"もう一度 kumo login を実行してください。続けて失敗するときは、ウイルス対策ソフトなどが login.json を開いていないか確かめてください。",
+		});
+	}
 
 	// Revoke the grant this login replaces, after the new one is saved (research L13).
 	let revokedPrevious = false;

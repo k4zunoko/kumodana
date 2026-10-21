@@ -22,7 +22,7 @@ export async function logout(runtime: Runtime): Promise<number> {
 	const path = loginFilePath(ctx.env, ctx.platform);
 	let record: LoginRecord | undefined;
 	try {
-		record = await readLogin(path, ctx.urls);
+		record = await readLogin(path, ctx.urls, ctx.loginFs);
 	} catch (error) {
 		if (error instanceof CliError && error.code === "login_invalid") {
 			throw new CliError(error.message, {
@@ -49,10 +49,10 @@ export async function logout(runtime: Runtime): Promise<number> {
 	}
 
 	try {
-		await writeLogin(path, { ...record, session: null });
+		await writeLogin(path, { ...record, session: null }, ctx.loginFs);
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		throw new CliError(`ログインの記録から資格情報を消せませんでした（${reason}）。`, {
+		const reason = error instanceof CliError ? String(error.details?.errno ?? error.code) : String(error);
+		throw new CliError(`ログインの記録から資格情報を消せませんでした（${reason}）: ${path}`, {
 			code: "login_write_failed",
 			hint: revokeError
 				? `許可も取り消せていません。${path} を削除してください。${REVOKE_HINT}`

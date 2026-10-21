@@ -84,6 +84,15 @@ export function loginRequired(message = "ログインの期限が切れたか、
 /** Refresh errors that mean the grant itself is gone (research L8). */
 const GRANT_ERRORS = new Set(["invalid_grant", "invalid_client", "unauthorized_client"]);
 
+/** Failures of the refresh ahead of expiry that still allow sending the current access token. */
+const TEMPORARY = new Set(["network_error", "refresh_failed"]);
+
+/** A short reason for a warning: the errno for file errors, the code for other CLI errors. */
+function reasonOf(error: unknown): string {
+	if (error instanceof CliError) return String(error.details?.errno ?? error.code);
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** Refresh this long before the access token expires. */
 export const REFRESH_MARGIN_MS = 60_000;
 
@@ -164,7 +173,7 @@ export class LoginCredentials implements Credentials {
 	async #afterRejected(used: string): Promise<void> {
 		if (this.#reloaded) throw loginRequired();
 		this.#reloaded = true;
-		const latest = await readLogin(this.#path, this.#ctx.urls).catch(() => undefined);
+		const latest = await readLogin(this.#path, this.#ctx.urls, this.#ctx.loginFs).catch(() => undefined);
 		const session = latest?.session;
 		if (!latest || !session || latest.adminUrl !== this.#record.adminUrl || session.refreshToken === used) {
 			throw loginRequired();
@@ -177,16 +186,15 @@ export class LoginCredentials implements Credentials {
 	/** Writes only when login.json still holds this login; a newer login or a logout is never overwritten. */
 	async #save(): Promise<void> {
 		try {
-			const latest = await readLogin(this.#path, this.#ctx.urls);
+			const latest = await readLogin(this.#path, this.#ctx.urls, this.#ctx.loginFs);
 			const same =
 				latest?.session &&
 				latest.adminUrl === this.#record.adminUrl &&
 				latest.session.loggedInAt === this.#record.session.loggedInAt;
 			if (!latest || !same) return;
-			await writeLogin(this.#path, { ...latest, session: this.#record.session });
+			await writeLogin(this.#path, { ...latest, session: this.#record.session }, this.#ctx.loginFs);
 		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			printWarning(this.#out, `ログインの記録を保存できませんでした（${reason}）。次の操作では前の記録で更新します。`);
+			printWarning(this.#out, `ログインの記録を保存できませんでした（${reasonOf(error)}）。次の操作では前の記録で更新します。`);
 		}
 	}
 }

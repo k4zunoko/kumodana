@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -5,7 +6,7 @@ import { login } from "../src/commands/login.ts";
 import { list } from "../src/commands/ls.ts";
 import { put } from "../src/commands/put.ts";
 import { usage } from "../src/commands/usage.ts";
-import { type LoginRecord, readLogin, writeLogin } from "../src/login-store.ts";
+import { type LoginFs, type LoginRecord, readLogin, writeLogin } from "../src/login-store.ts";
 import { runCommand } from "../src/runtime.ts";
 import { type AuthServer, loginRuntime, mockAuthServer, sampleRecord, TEST_USAGE, tempConfigHome } from "./auth-server.ts";
 import { allOutput, type Captured, sendJson } from "./helpers.ts";
@@ -187,6 +188,37 @@ describe("kumo login (specs/003-cli-login contracts/cli.md)", () => {
 		const { code } = await runLogin(dir, server.url, {}, { context: { openUrl: async () => {}, callbackTimeoutMs: 200 } });
 		expect(code).toBe(1);
 		expect(await record(dir)).toEqual(previous);
+	});
+
+	it("revokes the new grant and asks to log in again when login.json cannot be saved (PR #12 review)", async () => {
+		server = await mockAuthServer();
+		const dir = await tempConfigHome();
+		let lastWritten = "";
+		const lockedOnSession: LoginFs = {
+			readFile: (p, e) => fs.readFile(p, e),
+			writeFile: async (p, d, o) => {
+				lastWritten = d;
+				await fs.writeFile(p, d, o);
+			},
+			rename: async (from, to) => {
+				if (lastWritten.includes('"accessToken"')) throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+				await fs.rename(from, to);
+			},
+			unlink: (p) => fs.unlink(p),
+			mkdir: (p, o) => fs.mkdir(p, o),
+		};
+		const { code, captured } = await runLogin(dir, server.url, {}, { context: { loginFs: lockedOnSession } });
+		expect(code).toBe(1);
+		const text = captured.stderr.join("\n");
+		expect(text).toContain("（login_write_failed）");
+		expect(text).toContain("今回のログインの許可は取り消しました");
+		expect(text).toContain("もう一度 kumo login を実行してください");
+		// The new refresh token (the last one issued) was revoked; the registration stays, without a session.
+		expect(server.revocations).toEqual([server.issued.at(-1)]);
+		const saved = await record(dir);
+		expect(saved.session).toBeNull();
+		expect(saved.client.clientId).toMatch(/^client-/);
+		expectNoTokens(server, captured);
 	});
 
 	it("ends with login_denied and saves no token when the authorization is refused", async () => {

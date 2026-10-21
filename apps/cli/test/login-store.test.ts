@@ -6,6 +6,7 @@ import {
 	allowedUrl,
 	type LoginFs,
 	normalizeAdminUrl,
+	RETRY_DELAYS_MS,
 	readLogin,
 	writeLogin,
 } from "../src/login-store.ts";
@@ -108,10 +109,11 @@ describe("login.json store (specs/003-cli-login data-model)", () => {
 		expect(normalizeAdminUrl("http://admin.example.invalid", STRICT)).toBeUndefined();
 	});
 
-	it("retries reads that fail with EPERM, EACCES, or EBUSY (Windows, review item 5)", async () => {
+	it("retries reads that fail with EPERM, EACCES, or EBUSY for about 2.5 seconds (Windows)", async () => {
 		const path = await loginPath();
 		await writeLogin(path, sampleRecord(BASE));
-		let failures = 2;
+		expect(RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0)).toBeGreaterThanOrEqual(2500);
+		let failures = RETRY_DELAYS_MS.length;
 		const fs = {
 			readFile: async (p: string, encoding: "utf8") => {
 				if (failures-- > 0) throw busy("EPERM");
@@ -145,7 +147,8 @@ describe("login.json store (specs/003-cli-login data-model)", () => {
 		};
 		const error = await errorOf(writeLogin(path, sampleRecord(BASE, null), fs));
 		expect(error.code).toBe("login_write_failed");
-		expect(renames).toBe(4);
+		expect(renames).toBe(RETRY_DELAYS_MS.length + 1);
+		expect(error.details?.errno).toBe("EACCES");
 		expect(await readLogin(path, STRICT)).toEqual(first);
 		expect((await readdir(join(path, ".."))).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
