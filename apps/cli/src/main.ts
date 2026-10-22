@@ -30,8 +30,14 @@ const program = new KumoCommand("kumo")
 	.addHelpText(
 		"after",
 		"\n初めて使うときは、kumo login <管理用 Worker の URL> でブラウザからログインする。" +
-			"\n使われる資格情報は kumo login --status で確かめられる。手順は docs/runbook.md §7 を参照。",
+			"\n使われる資格情報は kumo login --status で確かめられる。手順は docs/runbook.md §7 を参照。" +
+			"\n\n--json はすべてのコマンドで使える（コマンドの前でも後でもよい）。結果は標準出力に JSON で書き、" +
+			'\nエラーは標準エラー出力に {"error":{"code":…,"message":…,"hint":…}} の形で書く。' +
+			"\n終了コード: 0 成功、1 操作の失敗（API のエラー、通信の失敗、一部の失敗を含む）、" +
+			"\n2 使い方の誤り（引数の不足、ローカルでの検証失敗）",
 	)
+	// Subcommands copy these settings when they are created, so they come before the commands are registered.
+	.configureHelp({ showGlobalOptions: true })
 	.showHelpAfterError()
 	.exitOverride();
 

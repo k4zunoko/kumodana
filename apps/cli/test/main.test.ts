@@ -10,6 +10,24 @@ function kumo(...args: string[]): { code: number | null; stdout: string; stderr:
 	return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
+describe("kumo --help for agents", () => {
+	it("says that --json works with every command and what each exit code means", () => {
+		const { code, stdout } = kumo("--help");
+		expect(code).toBe(0);
+		expect(stdout).toContain("--json はすべてのコマンドで使える");
+		expect(stdout).toContain('{"error":{"code":…,"message":…,"hint":…}}');
+		expect(stdout).toContain("0 成功");
+		expect(stdout).toContain("1 操作の失敗（API のエラー、通信の失敗、一部の失敗を含む）");
+		expect(stdout).toContain("2 使い方の誤り（引数の不足、ローカルでの検証失敗）");
+	});
+
+	it.each([[["put"]], [["link", "create"]]])("lists --json in the help of kumo %j", (command) => {
+		const { code, stdout } = kumo(...command, "--help");
+		expect(code).toBe(0);
+		expect(stdout).toMatch(/^ {2}--json +結果を JSON で出力する$/m);
+	});
+});
+
 describe("usage errors with --json", () => {
 	it.each([
 		[["--json", "frobnicate"], "unknown command 'frobnicate'", "kumo --help"],
