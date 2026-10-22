@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { resetStorage, seed, TOKEN_A, TOKEN_B, TOKEN_C, TOKEN_D, TOKEN_UNKNOWN } from "./helpers.ts";
 
 const BASE = "https://kumo.example.workers.dev";
+const TOKEN_E = "EEEEEEEEEEEEEEEEEEEEEE";
 const CSP = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
 
 function get(path: string, method = "GET"): Promise<Response> {
@@ -42,27 +43,41 @@ describe("delivery", () => {
 		expect(await res.text()).toBe("");
 	});
 
-	it("returns the same 404 for unknown, revoked, pending, deleting, and object-less files", async () => {
+	it("returns one identical 404 for every link or path that cannot be shown", async () => {
+		await seed({ id: "read000001", links: [{ token: TOKEN_E }] });
 		await seed({ id: "revo000001", links: [{ token: TOKEN_A, revoked: true }] });
 		await seed({ id: "pend000001", status: "pending", links: [{ token: TOKEN_B }] });
 		await seed({ id: "dele000001", status: "deleting", links: [{ token: TOKEN_C }] });
 		await seed({ id: "gone000001", withObject: false, links: [{ token: TOKEN_D }] });
+		// Unknown (also a deleted file, whose links are gone), revoked, pending, deleting, object-less, and paths that are not links.
+		const requests: [path: string, method: string][] = [
+			...[TOKEN_UNKNOWN, TOKEN_A, TOKEN_B, TOKEN_C, TOKEN_D].map((token): [string, string] => [`/${token}`, "GET"]),
+			["/", "GET"],
+			["/favicon.ico", "GET"],
+			[`/${TOKEN_E}/extra`, "GET"],
+			[`/${TOKEN_E}.png`, "GET"],
+			[`/${TOKEN_D}`, "HEAD"],
+			[`/${TOKEN_UNKNOWN}`, "HEAD"],
+		];
+		const headers = new Set<string>();
 		const bodies = new Set<string>();
-		for (const token of [TOKEN_UNKNOWN, TOKEN_A, TOKEN_B, TOKEN_C, TOKEN_D]) {
-			const res = await get(`/${token}`);
+		for (const [path, method] of requests) {
+			const res = await get(path, method);
 			expect(res.status).toBe(404);
-			expect(res.headers.get("Cache-Control")).toBe("no-store");
-			expectCommonHeaders(res);
-			bodies.add(await res.text());
+			headers.add(JSON.stringify([...res.headers]));
+			if (method === "GET") bodies.add(await res.text());
 		}
-		expect([...bodies]).toEqual(["Not Found"]);
-	});
+		expect(headers.size).toBe(1);
+		expect(bodies.size).toBe(1);
 
-	it("returns 404 for the root and for extra path segments", async () => {
-		await seed({ id: "file000001", links: [{ token: TOKEN_A }] });
-		for (const path of ["/", `/${TOKEN_A}/extra`, `/${TOKEN_A}.png`, "/favicon.ico"]) {
-			expect((await get(path)).status).toBe(404);
-		}
+		const res = await get(`/${TOKEN_UNKNOWN}`);
+		expectCommonHeaders(res);
+		expect(res.headers.get("Cache-Control")).toBe("no-store");
+		expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+		const page = await res.text();
+		expect(page).toContain("<p>このリンクは使えません。取り消されたか、URL が違います。</p>");
+		expect(page).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+		expect(page).not.toMatch(/<script|\s(?:src|href)=|url\(/i);
 	});
 
 	it("rejects other methods with 405", async () => {
