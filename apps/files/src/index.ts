@@ -13,10 +13,22 @@ type DeliveryRow = {
 	sha256: string;
 };
 
+// One fixed page for every reason a link cannot be shown, so viewers cannot tell the reasons apart (FR-021).
+// No scripts or outside resources: it is shown under the same CSP sandbox as shared files.
+const NOT_FOUND_PAGE = `<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>このリンクは使えません</title>
+<style>body{margin:0;padding:2rem 1.5rem;font:1.25rem/1.7 system-ui,sans-serif}</style>
+<p>このリンクは使えません。取り消されたか、URL が違います。</p>
+`;
+
 function notFound(): Response {
 	const headers = uncachedHeaders();
-	headers.set("Content-Type", "text/plain; charset=utf-8");
-	return new Response("Not Found", { status: 404, headers });
+	headers.set("Content-Type", "text/html; charset=utf-8");
+	return new Response(NOT_FOUND_PAGE, { status: 404, headers });
 }
 
 function redirectTo(location: string): Response {
