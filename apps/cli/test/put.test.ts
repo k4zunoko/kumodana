@@ -71,6 +71,10 @@ beforeEach(async () => {
 				},
 			});
 		}
+		const tagsMatch = /^\/api\/files\/(\w+)\/tags$/.exec(url.pathname);
+		if (req.method === "PATCH" && tagsMatch) {
+			return sendJson(res, 200, { tags: (JSON.parse(body.toString()) as { add?: string[] }).add ?? [] });
+		}
 		const contentMatch = /^\/api\/files\/(\w+)\/content$/.exec(url.pathname);
 		if (req.method === "GET" && contentMatch) {
 			const file = files.find((f) => f.id === contentMatch[1]);
@@ -198,6 +202,12 @@ describe("kumo put", () => {
 		expect(await putJson(report, { link: true })).toEqual({ duplicate: true, activeLinkCount: 2 });
 		expect(await putJson(report, {})).toEqual({ duplicate: true, activeLinkCount: 2 });
 		expect(await putJson(plain, {})).toEqual({ duplicate: false, activeLinkCount: 0 });
+
+		// With --tag as well, the summary keeps the tags it was given.
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, [plain], { tag: ["旅行"], link: true })).toBe(0);
+		const { results } = JSON.parse(captured.stdout.join("\n")) as { results: { file: { tags: string[]; activeLinkCount: number } }[] };
+		expect(results[0]?.file).toMatchObject({ tags: ["旅行"], activeLinkCount: 1 });
 	});
 });
 

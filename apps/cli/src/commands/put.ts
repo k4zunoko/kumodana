@@ -134,6 +134,8 @@ async function putOne(api: AdminApi, path: string, options: PutOptions, as: As |
 	if (options.link) {
 		const json = options.label ? { label: options.label } : {};
 		result.link = (await api.request<LinkResponse>("POST", `/api/files/${file.id}/links`, { json })).link;
+		// The summary was read before this link existed, and a new link is always active.
+		result.file = { ...(result.file ?? file), activeLinkCount: file.activeLinkCount + 1 };
 	}
 	return result;
 }
