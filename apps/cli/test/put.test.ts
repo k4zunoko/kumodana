@@ -17,16 +17,20 @@ let requests: string[] = [];
 let server: Awaited<ReturnType<typeof mockApi>>;
 let dir: string;
 let putConflict = false;
+/** The file ID of each active link, so that summaries report a real `activeLinkCount`. */
+let links: string[] = [];
 
 function summary(file: StoredFile) {
 	const { body: _body, ...rest } = file;
-	return { ...rest, createdAt: new Date(0).toISOString(), tags: [], activeLinkCount: 0 };
+	const activeLinkCount = links.filter((id) => id === file.id).length;
+	return { ...rest, createdAt: new Date(0).toISOString(), tags: [], activeLinkCount };
 }
 
 beforeEach(async () => {
 	files = [];
 	requests = [];
 	putConflict = false;
+	links = [];
 	dir = await mkdtemp(join(tmpdir(), "kumo-put-test-"));
 	server = await mockApi((req, body, res: ServerResponse) => {
 		const url = new URL(req.url ?? "/", "http://x");
@@ -54,6 +58,7 @@ beforeEach(async () => {
 		}
 		const linkMatch = /^\/api\/files\/(\w+)\/links$/.exec(url.pathname);
 		if (req.method === "POST" && linkMatch) {
+			links.push(linkMatch[1] as string);
 			const payload = JSON.parse(body.toString() || "{}") as { label?: string };
 			return sendJson(res, 201, {
 				link: {
@@ -175,6 +180,24 @@ describe("kumo put", () => {
 		const result = JSON.parse(captured.stdout.join("\n")) as { results: { file: { id: string }; link: { url: string } }[] };
 		expect(result.results[0]?.file.id).toBe((files[0] as StoredFile).id);
 		expect(result.results[0]?.link.url).toContain("kumo.example");
+	});
+
+	it("counts the link it creates in activeLinkCount, for a new file and for the same content again", async () => {
+		const report = join(dir, "report.html");
+		await writeFile(report, "<!doctype html><p>report</p>");
+		const plain = join(dir, "plain.html");
+		await writeFile(plain, "<!doctype html><p>plain</p>");
+		const putJson = async (path: string, options: { link?: boolean }) => {
+			const { runtime, captured } = testRuntime(server.url, true);
+			expect(await put(runtime, [path], options)).toBe(0);
+			type Result = { duplicate: boolean; file: { activeLinkCount: number } };
+			const result = (JSON.parse(captured.stdout.join("\n")) as { results: Result[] }).results[0];
+			return { duplicate: result?.duplicate, activeLinkCount: result?.file.activeLinkCount };
+		};
+		expect(await putJson(report, { link: true })).toEqual({ duplicate: false, activeLinkCount: 1 });
+		expect(await putJson(report, { link: true })).toEqual({ duplicate: true, activeLinkCount: 2 });
+		expect(await putJson(report, {})).toEqual({ duplicate: true, activeLinkCount: 2 });
+		expect(await putJson(plain, {})).toEqual({ duplicate: false, activeLinkCount: 0 });
 	});
 });
 
