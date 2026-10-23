@@ -42,7 +42,8 @@
 1. サイズを確認（100MB 以上は送信前に拒否）
 2. 中身で形式を判定（対象外・HEIC は理由とともに拒否）。2026-10-19 注記: [002 の contracts](../../002-markdown-share/contracts/cli.md)
    で置き換えた（Markdown 文書とテキストの変換、`--as`、判定結果と警告の表示）
-3. 画像で `--keep-exif` がなければ、一時コピーの EXIF を削除（向きとカラープロファイルは残す）
+3. 画像で `--keep-exif` がなければ、一時コピーの EXIF を削除（向きとカラープロファイルは残す）。2026-10-23 注記: SVG も
+   `--keep-exif` がなければメタデータを取り除く。詳細は [002 の contracts](../../002-markdown-share/contracts/cli.md) の手順 3
 4. SHA-256 を計算し、同じ内容がないか確認（`GET /api/files?sha256=`）
 5. なければ `PUT /api/files`、あれば既存のファイルを使う。`409 upload_in_progress` の場合は、待つ時間（`retryAfterSeconds`）を
    表示してそのファイルを失敗扱いにする
