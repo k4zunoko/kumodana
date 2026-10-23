@@ -52,7 +52,8 @@ kumo logout                              # この PC の許可を取り消し、
 ```sh
 kumo put photo.jpg --tag 旅行 --link     # 置いてリンクを発行
 kumo put note.md --link                  # Markdown 文書を HTML に変換して置く（note.md.html）
-kumo put app.log --as text               # Markdown として解釈せず、そのままの形で見せる
+kumo put memo.txt                        # .txt・.log・.csv・.json などは、そのままの形で見せる（memo.txt.html）
+kumo put memo.txt --as markdown          # テキスト系の拡張子でも Markdown として変換する
 kumo preview note.md                     # 置く前にブラウザで確かめる（管理 API は使わない）
 kumo ls --tag 旅行 --tag 2026            # すべてのタグを持つファイルを一覧
 kumo tags                                # タグと件数
@@ -73,6 +74,9 @@ kumo usage                               # 使用量
 
 - 形式は拡張子ではなく中身で判定する。画像・SVG・HTML のどれでもない UTF-8 のテキストは、Markdown 文書として
   HTML に変換して置く。棚に置く名前は元の名前に `.html` を足したもの（`note.md` → `note.md.html`）
+- ただし、拡張子が `.txt`・`.log`・`.csv`・`.json` などのテキストやソースコードのものは、既定で `--as text` と同じく
+  そのままの形（等幅、行どおり）で見せる。Markdown として変換するには `--as markdown` を付ける（2026-10-23 から。
+  置けるかどうかと、画像・SVG・HTML かどうかは、今までどおり中身だけで決まる）
 - 対応する記法は CommonMark と、表・タスクリスト・取り消し線・ URL の自動リンク。生の HTML は文字として表示する
 - UTF-8 で保存する。Windows PowerShell 5.1 の `>` や `Out-File` は UTF-16 で書くので、拒否される
 - 単独の改行は改行にならない（CommonMark どおり）。改行するには行末に空白を 2 つ置くか `\` を置く。
