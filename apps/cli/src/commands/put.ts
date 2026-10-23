@@ -23,6 +23,8 @@ import { removeSvgMetadata } from "../svg.ts";
 import { parseTagChanges } from "./tag.ts";
 import type { Register } from "./index.ts";
 
+const METADATA_KEPT_WARNING = "--keep-exif を付けたため、メタデータ（位置情報、作者名など）を残したまま置きました。";
+
 export type PutOptions = {
 	tag?: string[];
 	link?: boolean;
@@ -102,14 +104,16 @@ async function putOne(api: AdminApi, path: string, options: PutOptions, as: As |
 
 	let data = prepared.data;
 	const warnings = [...prepared.warnings];
-	if (prepared.kind === "image" && !options.keepExif) {
+	if (options.keepExif && (prepared.kind === "image" || prepared.kind === "svg")) {
+		warnings.push(METADATA_KEPT_WARNING);
+	} else if (prepared.kind === "image") {
 		const stripped = await stripMetadata(path);
 		try {
 			data = await readFile(stripped.path);
 		} finally {
 			await stripped.cleanup();
 		}
-	} else if (prepared.kind === "svg" && !options.keepExif) {
+	} else if (prepared.kind === "svg") {
 		const cleaned = removeSvgMetadata(data);
 		data = cleaned.data;
 		warnings.push(...cleaned.warnings);

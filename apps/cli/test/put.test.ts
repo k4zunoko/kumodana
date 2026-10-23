@@ -360,6 +360,31 @@ describe("kumo put: SVG metadata", () => {
 		expect(json(captured).results.map((r) => r.duplicate)).toEqual([false, true]);
 	});
 
+	it("sends images and SVG unchanged with --keep-exif and warns that the metadata is kept", async () => {
+		const image = await fixture("gps.png");
+		const svg = await fixture("inkscape.svg");
+		const { runtime, captured } = testRuntime(server.url);
+		expect(await put(runtime, [image, svg], { keepExif: true })).toBe(0);
+		expect((files[0] as StoredFile).body.equals(await readFile(image))).toBe(true);
+		expect((files[1] as StoredFile).body.equals(await readFile(svg))).toBe(true);
+		const stderr = captured.stderr.join("\n");
+		expect(stderr).toContain(`警告: ${image}: --keep-exif を付けたため、メタデータ`);
+		expect(stderr).toContain(`警告: ${svg}: --keep-exif を付けたため、メタデータ`);
+
+		files = [];
+		const { runtime: withJson, captured: jsonOut } = testRuntime(server.url, true);
+		await put(withJson, [image, svg], { keepExif: true });
+		expect(json(jsonOut).results.map((r) => r.warnings)).toEqual([
+			[expect.stringContaining("--keep-exif を付けたため")],
+			[expect.stringContaining("--keep-exif を付けたため")],
+		]);
+
+		files = [];
+		const { runtime: without, captured: withoutOut } = testRuntime(server.url);
+		await put(without, [image, svg], {});
+		expect(allOutput(withoutOut)).not.toContain("--keep-exif を付けたため");
+	});
+
 	it("warns about photos embedded in an SVG, but not about an SVG without them", async () => {
 		const embedded = await fixture("embedded-photo.svg");
 		const plain = await fixture("plain.svg");
