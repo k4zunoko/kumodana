@@ -73,6 +73,8 @@ kumo put ./memo.txt ./data.json ./photo.jpg
 
 - 期待: `memo.txt` と `data.json` は Markdown として置かれ、拡張子の食い違い（と JSON）の警告、`--as text` の案内が出る。
   最後に形式ごとの件数と警告の件数が出る
+  - 2026-10-23 注記: 見直した。`memo.txt` と `data.json` は `テキスト → HTML` として置かれ、警告は出ない。
+    `--as markdown` を付けると Markdown になる。拡張子のない JSON（`README` など）は、今までどおり Markdown と JSON の警告になる
 - 期待: Windows PowerShell 5.1 で `"# test" > ps.md` として作ったファイル（UTF-16LE）は、何も保存されず、UTF-8 で保存し直すよう案内される
 - 期待: `-----BEGIN PRIVATE KEY-----` の行を含むテキストは、`--as text` を付けても何も保存されない（本物の鍵は使わない）
 
