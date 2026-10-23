@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">
+  <title>図</title>
+  <rect x="5" y="5" width="110" height="50" fill="#fc6" stroke="#333"/>
+  <text x="60" y="36" font-family="sans-serif" font-size="14" text-anchor="middle">plain</text>
+</svg>

@@ -19,6 +19,7 @@ import { formatBytes, printError, printResult, printWarning } from "../output.ts
 import { KIND_LABELS, parseAs, prepare } from "../prepare.ts";
 import type { Runtime } from "../runtime.ts";
 import { AS_VALUES, type As, type Kind } from "../sniff.ts";
+import { removeSvgMetadata } from "../svg.ts";
 import { parseTagChanges } from "./tag.ts";
 import type { Register } from "./index.ts";
 
@@ -100,6 +101,7 @@ async function putOne(api: AdminApi, path: string, options: PutOptions, as: As |
 	const prepared = prepare(original, basename(path), as);
 
 	let data = prepared.data;
+	const warnings = [...prepared.warnings];
 	if (prepared.kind === "image" && !options.keepExif) {
 		const stripped = await stripMetadata(path);
 		try {
@@ -107,6 +109,10 @@ async function putOne(api: AdminApi, path: string, options: PutOptions, as: As |
 		} finally {
 			await stripped.cleanup();
 		}
+	} else if (prepared.kind === "svg" && !options.keepExif) {
+		const cleaned = removeSvgMetadata(data);
+		data = cleaned.data;
+		warnings.push(...cleaned.warnings);
 	}
 
 	const sha256 = createHash("sha256").update(data).digest("hex");
@@ -115,7 +121,7 @@ async function putOne(api: AdminApi, path: string, options: PutOptions, as: As |
 		? { file: existing, duplicate: true }
 		: await upload(api, data, prepared.contentType, sha256, prepared.name);
 
-	const result: PutResult = { path, kind: prepared.kind, warnings: prepared.warnings, file, duplicate };
+	const result: PutResult = { path, kind: prepared.kind, warnings, file, duplicate };
 	if (options.tag && options.tag.length > 0) {
 		const { add } = parseTagChanges(options.tag.map((t) => `+${t}`));
 		const tagged = await api.request<TagsResponse>("PATCH", `/api/files/${file.id}/tags`, { json: { add } });
@@ -197,12 +203,12 @@ export function asOption(): Option {
 export const registerPut: Register = (program: Command, wrap) => {
 	program
 		.command("put")
-		.description("ファイルを置く（画像の EXIF は既定で削除し、Markdown 文書とテキストは HTML に変換する）")
+		.description("ファイルを置く（画像と SVG のメタデータは既定で削除し、Markdown 文書とテキストは HTML に変換する）")
 		.argument("<path...>", "置くファイル")
 		.option("--tag <tag>", "タグを付ける（繰り返し指定できる）", (value: string, previous: string[] = []) => [...previous, value])
 		.option("--link", "リンクも発行する")
 		.option("--label <text>", "リンクに付けるメモ")
-		.option("--keep-exif", "画像のメタデータを残す")
+		.option("--keep-exif", "画像と SVG のメタデータを残す")
 		.addOption(asOption())
 		.action(wrap(async (runtime, paths, options) => put(runtime, paths as string[], options as PutOptions)));
 };

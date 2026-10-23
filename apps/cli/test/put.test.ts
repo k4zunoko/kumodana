@@ -315,3 +315,70 @@ describe("kumo put: Markdown documents and text (002)", () => {
 		expect(out).toContain("失敗: 2 件");
 	});
 });
+
+describe("kumo put: SVG metadata", () => {
+	type Result = { path: string; kind: string; warnings: string[]; duplicate: boolean; error?: { code: string } };
+	const sent = (index: number) => (files[index] as StoredFile).body.toString("utf8");
+	const json = (captured: { stdout: string[] }) => JSON.parse(captured.stdout.join("\n")) as { results: Result[] };
+
+	it("removes <metadata>, drawing programs' data, and comments, and keeps the drawing", async () => {
+		const inkscape = await fixture("inkscape.svg");
+		const illustrator = await fixture("illustrator.svg");
+		const originals = [await readFile(inkscape), await readFile(illustrator)];
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, [inkscape, illustrator], {})).toBe(0);
+
+		for (const [index, file] of files.entries()) {
+			expect(file.contentType).toBe("image/svg+xml");
+			expect(file.sha256).toBe(createHash("sha256").update(file.body).digest("hex"));
+			expect(file.body.length).toBeLessThan((originals[index] as Buffer).length);
+			expect(sent(index)).not.toMatch(/<metadata|<!--|sodipodi|inkscape|xmlns:(dc|cc|rdf|x|i|graph)=|\si:|<i:/);
+		}
+		expect(sent(0)).not.toMatch(/Taro Yamada|taro\.yamada|間取り図\.(svg|png)|2026-10-01|居間 -->/);
+		for (const kept of ['viewBox="0 0 200 120"', 'id="title1">間取り図</title>', 'id="desc1">居間と寝室</desc>',
+			'id="layer1"', 'id="floor">', ".wall { stroke: #333;", 'd="M 10,10 H 190 V 110 H 10 Z M 130,10 V 110"',
+			'xml:space="preserve"', ">居間  と  台所</tspan>"]) {
+			expect(sent(0)).toContain(kept);
+		}
+		expect(sent(1)).not.toMatch(/Adobe Illustrator|adobe_illustrator_pgf|eJzsvWuTHMdxKPq9f9X5|赤い丸/);
+		for (const kept of ['xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"', ".st0{fill:#E60012;}", "<title>ロゴ案</title>",
+			"<desc>作業用の書き出し</desc>", '<circle class="st0" cx="50" cy="60" r="35"/>', ">Hanako   Sato</text>"]) {
+			expect(sent(1)).toContain(kept);
+		}
+		expect(json(captured).results.map((r) => [r.kind, r.warnings])).toEqual([["svg", []], ["svg", []]]);
+		expect([await readFile(inkscape), await readFile(illustrator)]).toEqual(originals);
+	});
+
+	it("judges duplicates by the cleaned content", async () => {
+		const first = await fixture("inkscape.svg");
+		const second = join(dir, "inkscape-renamed.svg");
+		const original = await readFile(first, "utf8");
+		await writeFile(second, original.replace("Taro Yamada", "Hanako Sato").replace("<!-- 居間 -->", "<!-- 別のメモ -->"));
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, [first, second], {})).toBe(0);
+		expect(files).toHaveLength(1);
+		expect(json(captured).results.map((r) => r.duplicate)).toEqual([false, true]);
+	});
+
+	it("warns about photos embedded in an SVG, but not about an SVG without them", async () => {
+		const embedded = await fixture("embedded-photo.svg");
+		const plain = await fixture("plain.svg");
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, [embedded, plain], {})).toBe(0);
+		expect(json(captured).results.map((r) => r.warnings)).toEqual([[expect.stringContaining("埋め込まれた画像")], []]);
+		expect((files[1] as StoredFile).body.equals(await readFile(plain))).toBe(true);
+	});
+
+	it("refuses an SVG it cannot read, unless --keep-exif is given", async () => {
+		const broken = join(dir, "broken.svg");
+		await writeFile(broken, '<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>');
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, [broken], {})).toBe(1);
+		expect(json(captured).results[0]?.error?.code).toBe("invalid_svg");
+		expect(files).toHaveLength(0);
+
+		const { runtime: keep } = testRuntime(server.url);
+		expect(await put(keep, [broken], { keepExif: true })).toBe(0);
+		expect((files[0] as StoredFile).body.equals(await readFile(broken))).toBe(true);
+	});
+});
