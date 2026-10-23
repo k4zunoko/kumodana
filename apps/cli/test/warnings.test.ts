@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extensionOf, extensionWarning, jsonWarning } from "../src/warnings.ts";
+import { extensionOf, extensionWarning, jsonWarning, showsAsText } from "../src/warnings.ts";
 
 describe("extensionOf", () => {
 	it("returns the lower-case extension with its dot", () => {
@@ -12,15 +12,18 @@ describe("extensionOf", () => {
 	});
 });
 
-describe("extensionWarning (FR-019)", () => {
-	it("warns when text with a text or code extension becomes Markdown, pointing to --as text", () => {
-		for (const name of ["memo.txt", "data.csv", "data.json", "app.log", "script.py", ".env"]) {
-			const warning = extensionWarning(name, "markdown", false);
-			expect(warning, name).toContain("Markdown 文書と判定しました");
-			expect(warning, name).toContain("--as text");
+describe("showsAsText", () => {
+	it("is true for text and code extensions, and false for Markdown, other, unknown, and missing ones", () => {
+		for (const name of ["memo.txt", "Memo.TXT", "data.csv", "data.json", "app.log", "script.py", ".env"]) {
+			expect(showsAsText(name), name).toBe(true);
+		}
+		for (const name of ["note.md", "README", "notes.weird", "page.html", "logo.svg", "photo.png"]) {
+			expect(showsAsText(name), name).toBe(false);
 		}
 	});
+});
 
+describe("extensionWarning (FR-019)", () => {
 	it("explains how to make a file HTML when an .html file becomes Markdown", () => {
 		const warning = extensionWarning("snippet.html", "markdown", false);
 		expect(warning).toContain("拡張子は .html ですが、中身から Markdown 文書と判定しました。");

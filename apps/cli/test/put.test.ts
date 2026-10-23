@@ -245,14 +245,91 @@ describe("kumo put: Markdown documents and text (002)", () => {
 		expect(captured.stderr).toEqual([]);
 	});
 
-	it("warns about a .txt file shown as Markdown and keeps going", async () => {
-		const path = join(dir, "memo.txt");
-		await writeFile(path, "買い物\n- 牛乳\n");
+	it("shows a .txt file as it is, the same as --as text, and the same text in a .md file as Markdown", async () => {
+		const text = "# ここは見出しではなくただの行\n1. 集合は 9 時\n* 持ち物: 弁当\n";
+		const memo = join(dir, "連絡事項.txt");
+		await writeFile(memo, text);
+		const note = join(dir, "連絡事項.md");
+		await writeFile(note, text);
 		const { runtime, captured } = testRuntime(server.url);
-		expect(await put(runtime, [path], {})).toBe(0);
-		expect((files[0] as StoredFile).name).toBe("memo.txt.html");
-		expect(captured.stderr.join("\n")).toContain(`警告: ${path}: 拡張子は .txt ですが`);
-		expect(captured.stderr.join("\n")).toContain("--as text");
+		expect(await put(runtime, [memo, note], {})).toBe(0);
+		expect(files.map((f) => f.name)).toEqual(["連絡事項.txt.html", "連絡事項.md.html"]);
+		expect(html(files[0] as StoredFile)).toContain(`<pre>\n${text}</pre>`);
+		expect(html(files[0] as StoredFile)).not.toMatch(/<h1>|<ol>|<ul>/);
+		expect(html(files[1] as StoredFile)).toContain("<h1>ここは見出しではなくただの行</h1>");
+		const out = captured.stdout.join("\n");
+		expect(out).toMatch(/連絡事項\.txt\.html .* テキスト → HTML/);
+		expect(out).toMatch(/連絡事項\.md\.html .* Markdown → HTML/);
+		expect(captured.stderr).toEqual([]);
+
+		// --as text gives the same bytes, so the page is found as a duplicate; --as markdown gives the .md page.
+		type Result = { kind: string; duplicate: boolean; file: { id: string }; warnings: string[] };
+		const putJson = async (options: { as?: string }) => {
+			const { runtime: json, captured: jsonOut } = testRuntime(server.url, true);
+			expect(await put(json, [memo], options)).toBe(0);
+			return (JSON.parse(jsonOut.stdout.join("\n")) as { results: Result[] }).results[0];
+		};
+		expect(await putJson({ as: "text" })).toMatchObject({ kind: "text", duplicate: true, file: { id: files[0]?.id }, warnings: [] });
+		expect(await putJson({ as: "markdown" })).toMatchObject({ kind: "markdown", duplicate: true, file: { id: files[1]?.id } });
+		expect(files).toHaveLength(2);
+	});
+
+	it("chooses the default by extension: text for .log, .csv, .json, and .env, and Markdown without a known one", async () => {
+		const json = '{"a": [1, 2], "b": "*x*"}\n';
+		const cases: [string, string][] = [
+			["app.log", "12:00 [INFO] start\n# not a heading\n"],
+			["名簿.csv", "名前,点数\n*佐藤*,80\n"],
+			["data.json", json],
+			[".env", "# comment\nKEY=value\n"],
+			["README", json],
+			["notes.foo", "# title\n\n- item\n"],
+		];
+		for (const [name, content] of cases) await writeFile(join(dir, name), content);
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, cases.map(([name]) => join(dir, name)), {})).toBe(0);
+		const { results } = JSON.parse(captured.stdout.join("\n")) as { results: { kind: string; warnings: string[] }[] };
+		expect(results.map((r) => r.kind)).toEqual(["text", "text", "text", "text", "markdown", "markdown"]);
+		expect(results.map((r) => r.warnings)).toEqual([[], [], [], [], [expect.stringContaining("全体が JSON として読めます")], []]);
+		expect(files.map((f) => f.name)).toEqual(cases.map(([name]) => `${name}.html`));
+		expect(html(files[2] as StoredFile)).toContain("<pre>\n{&#34;a&#34;: [1, 2], &#34;b&#34;: &#34;*x*&#34;}\n</pre>");
+	});
+
+	it("still decides by content whether a file with a text extension is accepted, and as what", async () => {
+		const cases: [string, string | Uint8Array][] = [
+			["page.txt", "<!doctype html><p>html</p>"],
+			["logo.txt", '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>'],
+			["doc.txt", "%PDF-1.7\n"],
+			["archive.txt", new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0])],
+			["sjis.txt", new Uint8Array([0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0x0a])],
+			["utf16.txt", new Uint8Array([0xff, 0xfe, 0x23, 0x00, 0x20, 0x00, 0x61, 0x00])],
+			["empty.txt", ""],
+			["key.txt", "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n"],
+		];
+		for (const [name, content] of cases) await writeFile(join(dir, name), content);
+		const { runtime, captured } = testRuntime(server.url, true);
+		expect(await put(runtime, cases.map(([name]) => join(dir, name)), {})).toBe(1);
+		const { results } = JSON.parse(captured.stdout.join("\n")) as { results: { kind?: string; error?: { code: string } }[] };
+		expect(results.map((r) => r.kind ?? r.error?.code)).toEqual([
+			"html",
+			"svg",
+			"unsupported_type",
+			"unsupported_type",
+			"unsupported_encoding",
+			"unsupported_encoding",
+			"unsupported_type",
+			"private_key",
+		]);
+		expect(files.map((f) => [f.name, f.contentType])).toEqual([
+			["page.txt", "text/html; charset=utf-8"],
+			["logo.txt", "image/svg+xml"],
+		]);
+
+		// exiftool refuses to rewrite a PNG named .txt (as before this change), so the image is checked with --keep-exif.
+		const photo = join(dir, "photo.txt");
+		await copyFile(new URL("./fixtures/gps.png", import.meta.url), photo);
+		const { runtime: image } = testRuntime(server.url);
+		expect(await put(image, [photo], { keepExif: true })).toBe(0);
+		expect(files.map((f) => [f.name, f.contentType])[2]).toEqual(["photo.txt", "image/png"]);
 	});
 
 	it("shows text as it is with --as text", async () => {
@@ -311,7 +388,7 @@ describe("kumo put: Markdown documents and text (002)", () => {
 		expect(out).toContain("unsupported_encoding");
 		expect(out).toContain("秘密鍵");
 		expect(out).toContain("private_key");
-		expect(out).toContain("形式: Markdown → HTML 2 件、HTML 1 件 / 警告: 1 件");
+		expect(out).toContain("形式: Markdown → HTML 1 件、HTML 1 件、テキスト → HTML 1 件 / 警告: 0 件");
 		expect(out).toContain("失敗: 2 件");
 	});
 });

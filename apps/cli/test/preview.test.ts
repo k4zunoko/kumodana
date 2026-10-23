@@ -70,6 +70,31 @@ describe("kumo preview", () => {
 		await rm(join(result.path, ".."), { recursive: true, force: true });
 	});
 
+	it("shows a .txt file as it is by default, and as Markdown with --as markdown", async () => {
+		const text = "# ここは見出しではなくただの行\n1. 集合は 9 時\n";
+		const path = join(dir, "連絡事項.txt");
+		await writeFile(path, text);
+		const { opener } = recordingOpener();
+		const show = async (name: string, options: { as?: string }) => {
+			const { runtime, captured } = offlineRuntime(true);
+			expect(await preview(runtime, path, { ...options, output: name, cwd: dir }, opener)).toBe(0);
+			const result = JSON.parse(captured.stdout.join("\n")) as { kind: string; warnings: string[] };
+			return { ...result, page: await readFile(join(dir, name), "utf8") };
+		};
+		const byDefault = await show("default.html", {});
+		expect(byDefault).toMatchObject({ kind: "text", warnings: [] });
+		expect(byDefault.page).toBe((await show("as-text.html", { as: "text" })).page);
+		expect(byDefault.page).toContain(`<pre>\n${text}</pre>`);
+		const asMarkdown = await show("as-markdown.html", { as: "markdown" });
+		expect(asMarkdown.kind).toBe("markdown");
+		expect(asMarkdown.page).toContain("<h1>ここは見出しではなくただの行</h1>");
+
+		const { runtime, captured } = offlineRuntime();
+		expect(await preview(runtime, path, { output: "human.html", cwd: dir }, opener)).toBe(0);
+		expect(captured.stdout.join("\n")).toContain("形式: テキスト → HTML");
+		expect(captured.stderr).toEqual([]);
+	});
+
 	it("saves to --output without opening, and never overwrites", async () => {
 		const path = join(dir, "app.log");
 		await writeFile(path, "line 1\n  line 2\n");

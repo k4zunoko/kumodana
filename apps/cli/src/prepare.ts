@@ -4,11 +4,12 @@ import { CliError, EXIT_USAGE } from "./errors.ts";
 import { renderMarkdown, renderText, sharedName } from "./markdown.ts";
 import { formatBytes } from "./output.ts";
 import { AS_VALUES, type As, type Kind, sniff } from "./sniff.ts";
-import { extensionWarning, jsonWarning } from "./warnings.ts";
+import { extensionWarning, jsonWarning, showsAsText } from "./warnings.ts";
 
 /**
  * Turns a file's bytes into what `kumo put` sends and `kumo preview` shows (specs/002-markdown-share
- * contracts/cli.md): images, SVG, and HTML as they are; Markdown documents and text converted to HTML.
+ * contracts/cli.md): images, SVG, and HTML as they are; Markdown documents and text converted to HTML. Without `--as`,
+ * text is a Markdown document, except that text with a text or code extension is shown as it is (2026-10-23).
  */
 
 export type Prepared = {
@@ -44,8 +45,10 @@ export function prepare(bytes: Uint8Array, name: string, as: As | undefined): Pr
 	if (!sniffed.ok) {
 		throw new CliError(sniffed.reason, { code: sniffed.code, ...(sniffed.hint ? { hint: sniffed.hint } : {}) });
 	}
+	// Only the display of text follows the extension; whether and how a file is accepted is decided by sniff alone.
+	const kind = sniffed.kind === "markdown" && !as && showsAsText(name) ? "text" : sniffed.kind;
 	const warnings: string[] = [];
-	const extension = extensionWarning(name, sniffed.kind, as !== undefined);
+	const extension = extensionWarning(name, kind, as !== undefined);
 	if (extension) warnings.push(extension);
 
 	if ("contentType" in sniffed) {
@@ -53,7 +56,7 @@ export function prepare(bytes: Uint8Array, name: string, as: As | undefined): Pr
 	}
 
 	let rendered;
-	if (sniffed.kind === "markdown") {
+	if (kind === "markdown") {
 		if (!as) {
 			const json = jsonWarning(sniffed.text);
 			if (json) warnings.push(json);
@@ -69,7 +72,7 @@ export function prepare(bytes: Uint8Array, name: string, as: As | undefined): Pr
 		});
 	}
 	return {
-		kind: sniffed.kind,
+		kind,
 		contentType: "text/html; charset=utf-8",
 		data: rendered.html,
 		name: sharedName(name),

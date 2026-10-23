@@ -1,8 +1,9 @@
 import type { Kind } from "./sniff.ts";
 
 /**
- * Warnings about how a file was detected (FR-019, specs/002-markdown-share research M8). The extension is only
- * used here, never to decide the format (FR-001).
+ * Warnings about how a file was detected (FR-019, specs/002-markdown-share research M8), and the default display of text
+ * with a text or code extension (`showsAsText`). The extension is only used here and never decides whether a file is
+ * accepted or whether it is an image, SVG, HTML, or text (FR-001).
  */
 
 type Group = "markdown" | "html" | "svg" | "image" | "text";
@@ -49,6 +50,14 @@ export function extensionOf(name: string): string {
 }
 
 /**
+ * Whether text with this name is shown as it is (like `--as text`) instead of as Markdown when `--as` is not given:
+ * text and code extensions such as `.txt`, `.log`, `.csv`, and `.json` (2026-10-23).
+ */
+export function showsAsText(name: string): boolean {
+	return GROUP_OF.get(extensionOf(name)) === "text";
+}
+
+/**
  * Warns when the detected kind differs from what the extension suggests. Unknown extensions, files without one, and
  * kinds the owner chose with `--as` are not warned about.
  */
@@ -60,9 +69,6 @@ export function extensionWarning(name: string, kind: Kind, chosen: boolean): str
 	if (!expected || !actual || expected === actual) return undefined;
 	const lead = `拡張子は ${extension} ですが、中身から${KIND_NAMES[kind]}と判定しました。`;
 	if (kind === "markdown") {
-		if (expected === "text") {
-			return `${lead}改行や記号が Markdown として解釈され、見た目が変わります。そのままの形で見せるには --as text を付けてください。`;
-		}
 		if (expected === "html") {
 			return `${lead}先頭が <!doctype html> か <html> ではないためです。HTML として置くには、先頭に <!doctype html> を付けてください。`;
 		}
