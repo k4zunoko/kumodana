@@ -14,7 +14,7 @@ import { extensionWarning, jsonWarning } from "./warnings.ts";
 export type Prepared = {
 	kind: Kind;
 	contentType: AllowedContentType;
-	/** The bytes to send. For images, EXIF is still to be removed by `kumo put`. */
+	/** The bytes to send. For images and SVG, metadata is still to be removed by `kumo put`. */
 	data: Uint8Array;
 	/** The name on the shelf. */
 	name: string;
