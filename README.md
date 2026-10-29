@@ -20,6 +20,7 @@ Cloudflare 上に置く、自分専用の「共有用の棚」。画像、1 枚�
 | `apps/admin` | 管理用 Worker `kumodana-admin`（Hono。Cloudflare Access と JWT 検証で保護） |
 | `apps/files` | 配信用 Worker `kumo`（Workers Cache の後ろで、リンクからファイルを返す） |
 | `apps/cli` | kumo CLI（Node.js。ビルドせず型除去で実行） |
+| `apps/landing` | 紹介ページ（静的な HTML。main に push すると GitHub Actions で https://k4zunoko.github.io/kumodana/ に公開） |
 | `packages/shared` | 型、上限値、ID とタグの規則 |
 | `docs/runbook.md` | 初期設定、デプロイ、Access、予算アラート、緊急停止 |
 
