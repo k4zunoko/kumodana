@@ -14,6 +14,8 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
 	checksum_mismatch: "受け取った内容が SHA-256 と一致しません。もう一度アップロードしてください。",
 	storage_error: "ファイルの保存に失敗しました。もう一度アップロードしてください。",
 	invalid_tag: "タグの形式が正しくありません。",
+	duplicate_content: "同じ内容のファイルがすでにあります。同じ内容は 1 つのファイルとしてだけ置けます。",
+	precondition_failed: "ファイルの今の内容が、If-Match の SHA-256 と違います。ほかの操作で変わった可能性があります。",
 	internal_error: "内部エラーが発生しました。",
 };
 

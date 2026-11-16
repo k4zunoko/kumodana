@@ -7,9 +7,17 @@ export type FileSummary = {
 	size: number;
 	sha256: string;
 	createdAt: string;
+	/**
+	 * When the current content was put in place: when the upload finished, or when the content was last replaced
+	 * (specs/005-replace-content). Added in 005; older admin Workers do not send it.
+	 */
+	updatedAt: string;
 	tags: string[];
 	activeLinkCount: number;
 };
+
+/** What a file's content was before a replacement (specs/005-replace-content). */
+export type ContentSummary = Pick<FileSummary, "name" | "contentType" | "size" | "sha256">;
 
 export type Link = {
 	token: string;
@@ -45,6 +53,10 @@ export const ERROR_CODES = [
 	"checksum_mismatch",
 	"storage_error",
 	"invalid_tag",
+	/** The new content of a replacement is already stored as another file (specs/005-replace-content). */
+	"duplicate_content",
+	/** The If-Match of a replacement is not the file's current SHA-256 (specs/005-replace-content). */
+	"precondition_failed",
 	"internal_error",
 ] as const;
 
@@ -67,6 +79,16 @@ export type TagListResponse = { tags: TagCount[] };
 export type LinkResponse = { link: Link };
 export type LinkListResponse = { links: Link[] };
 export type RevokeResponse = { link: Link; purge: PurgeResult };
+/**
+ * `PUT /api/files/{id}/content` (specs/005-replace-content). `replaced: false` means the file already had this
+ * content: nothing changed and only the purge was retried. `previous` is the content before the request.
+ */
+export type ReplaceContentResponse = {
+	file: FileSummary;
+	replaced: boolean;
+	previous: ContentSummary;
+	purge: PurgeResult | null;
+};
 
 /** Header names used between the CLI and the admin API. */
 export const HEADER_CLIENT = "X-Kumodana-Client";
