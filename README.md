@@ -13,7 +13,8 @@ Cloudflare 上に置く、自分専用の「共有用の棚」。画像、1 枚�
 - 整理はタグだけ（複数タグでの絞り込みと、件数付きのタグ一覧）
 
 方針は [憲法](.specify/memory/constitution.md)、仕様と設計は [specs/001-share-shelf-mvp](specs/001-share-shelf-mvp/)、
-[specs/002-markdown-share](specs/002-markdown-share/)、[specs/003-cli-login](specs/003-cli-login/) にある。
+[specs/002-markdown-share](specs/002-markdown-share/)、[specs/003-cli-login](specs/003-cli-login/)、
+[specs/004-agent-service-token](specs/004-agent-service-token/) にある。
 
 ## 構成
 
@@ -49,8 +50,11 @@ kumo logout                              # この PC の許可を取り消し、
 ```
 
 ログインは Access の許可の期間のあいだ続き、アクセストークンは自動で更新される。期限が切れたら、案内に従って `kumo login` し直す。
-ブラウザのない環境や、Managed OAuth が使えないときは、CLI 用サービストークンを環境変数に一時的に設定して使える。シークレットは
-どこにも保存せず、使うたびに再発行する（runbook §3・§7）。
+ブラウザのない環境で一時的に使うときや、Managed OAuth が使えないときは、CLI 用サービストークンを環境変数に一時的に設定して
+使える。シークレットはどこにも保存せず、使うたびに再発行する（runbook §3・§7）。
+ブラウザのない環境に常駐するエージェント（所有者の個人エージェント）は、そのエージェント専用のサービストークンで、管理 API を
+直接使う（kumo CLI は変えていない。[runbook](docs/runbook.md) §7「常駐エージェントで使う」、
+[specs/004-agent-service-token](specs/004-agent-service-token/)）。
 
 ```sh
 kumo put photo.jpg --tag 旅行 --link     # 置いてリンクを発行
