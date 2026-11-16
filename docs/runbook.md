@@ -447,7 +447,8 @@ npm run resume -w @kumodana/files   # 再開
 | CLI 用サービストークン（退路、`kumodana-cli`）の更新 | 期限（2027-10-16）の前に、§3 の `refresh` で延ばす（シークレットは変わらない。退路を残すため）。シークレットは保存しないので、退路として使うときに §7 の `rotate` で再発行する。トークンを作り直した場合は `CLI_CLIENT_ID` を更新して再デプロイ |
 | エージェント用サービストークン（`kumodana-jolly`）の延長 | 期限（発行から 1 年。発行したら日付を §3 とここに書く）の前に、§7「常駐エージェントで使う」の `refresh` で延ばす（シークレットは変わらないので、Muse 側の登録はそのまま）。漏れたかもしれないときは `rotate` して、Muse の資格情報ストアに登録し直す（再デプロイは要らない） |
 | エージェント用サービストークン（`kumodana-jolly`）の取り消し | `delete` でトークンを消すか、§6 のポリシー `kumodana-jolly` を外す（§7）。Muse の登録も消す。所有者のログインと `kumodana-cli` には影響しない。作り直さないなら `AGENT_CLIENT_ID` を `""` にして再デプロイ |
-| Markdown の変換器の更新 | `markdown-it` と `@mdit/plugin-tasklist`（`apps/cli` の依存）のセキュリティ修正は、公開から 7 日経ってから `npm install -w kumodana-cli --save-exact markdown-it@<版>` で上げ、`npm test` を通して `npm install -g ./apps/cli` し直す。Worker のデプロイは要らない。置いた文書は自動では変わらない（置き直すと別のファイルになる） |
+| 共有済みのファイルの中身を直す | `kumo put <path> --replace <ファイル ID かリンクの URL>`。同じファイル（同じ ID）の中身を置き換え、そのファイルの有効なリンクすべてが、同じ URL のまま新しい内容になる。メモ、タグ、置いた日時も変わらない。前処理（メタデータの削除、Markdown 文書の変換、`--keep-exif`、`--as`）は `kumo put` と同じ。名前と形式は新しい内容のものになり、画像と HTML の間で変わるときは警告が出る。元の内容は棚に残らないので、戻すときは手元の原本で置き換え直す。キャッシュの削除に失敗したと表示されたら、同じコマンドをもう一度実行する（内容は変えずに削除だけをやり直す。やり直さなくても 1 時間以内に新しい内容になる）。新しい内容が別のファイルとしてすでにあるときは置き換えられない（そのファイルの ID が示される）。仕様は [specs/005-replace-content](../specs/005-replace-content/spec.md) |
+| Markdown の変換器の更新 | `markdown-it` と `@mdit/plugin-tasklist`（`apps/cli` の依存）のセキュリティ修正は、公開から 7 日経ってから `npm install -w kumodana-cli --save-exact markdown-it@<版>` で上げ、`npm test` を通して `npm install -g ./apps/cli` し直す。Worker のデプロイは要らない。置いた文書は自動では変わらない。新しい変換で見せたい文書は、原本から `kumo put <原本> --replace <ファイル ID>` で置き換える（ID とリンクはそのまま） |
 
 ## 11. 検証の記録（research.md の確認事項。001 の T030・T082、003 の T038）
 
@@ -528,6 +529,10 @@ T035 は、所有者の PC で `APPDATA` を一時フォルダーに向けて行
 ### 004: エージェント用サービストークン
 
 未実施（接続の実装後に記録）。
+
+### 005: 中身の置き換え
+
+未実施。
 
 ## 13. 既知の問題
 
