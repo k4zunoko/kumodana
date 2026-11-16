@@ -22,15 +22,24 @@ export type AuthConfig = {
 	teamDomain: string;
 	audience: string;
 	ownerEmail: string;
-	cliClientId: string;
+	/**
+	 * Service-token client IDs accepted as the `cli` principal: the CLI's (CLI_CLIENT_ID) and, when set, the resident
+	 * agent's (AGENT_CLIENT_ID, specs/004-agent-service-token). Unset or empty values are left out.
+	 */
+	cliClientIds: readonly string[];
 };
+
+/** A configured client ID, or "" when the value is unset or empty (never the string "undefined"). */
+function clientIdFrom(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
 
 export function authConfigFromEnv(env: Env): AuthConfig {
 	return {
 		teamDomain: String(env.ACCESS_TEAM_DOMAIN).replace(/\/+$/, ""),
 		audience: String(env.ACCESS_AUD),
 		ownerEmail: String(env.OWNER_EMAIL).toLowerCase(),
-		cliClientId: String(env.CLI_CLIENT_ID),
+		cliClientIds: [clientIdFrom(env.CLI_CLIENT_ID), clientIdFrom(env.AGENT_CLIENT_ID)].filter((id) => id !== ""),
 	};
 }
 
@@ -62,7 +71,7 @@ export async function authenticate(
 	if (email && email === config.ownerEmail) return { kind: "owner", email };
 
 	const commonName = typeof payload.common_name === "string" ? payload.common_name : undefined;
-	if (!email && commonName && commonName === config.cliClientId) return { kind: "cli", clientId: commonName };
+	if (!email && commonName && config.cliClientIds.includes(commonName)) return { kind: "cli", clientId: commonName };
 
 	throw new ApiError(403, "forbidden");
 }
