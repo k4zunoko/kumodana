@@ -13,14 +13,14 @@
 | 列 | 型 | 制約 | 内容 |
 |---|---|---|---|
 | `id` | TEXT | PK | 10 文字の Crockford Base32（小文字） |
-| `r2_key` | TEXT | NOT NULL, UNIQUE | R2 のキー。`files/<id>` |
+| `r2_key` | TEXT | NOT NULL, UNIQUE | R2 のキー。`files/<id>`（2026-11-16 注記: 中身を置き換えたファイルは `files/<id>/<置き換えのたびに作る ID>` になる。[005](../005-replace-content/spec.md)） |
 | `name` | TEXT | NOT NULL, 1〜255 文字 | 元のファイル名（パスを含まない） |
 | `content_type` | TEXT | NOT NULL | 許可された形式のいずれか（下記） |
 | `size` | INTEGER | NOT NULL, 1 以上 99999999 以下（100MB 未満を 10 進で解釈） | バイト数 |
 | `sha256` | TEXT | NOT NULL | 保存する内容（EXIF 削除後）の SHA-256（小文字 16 進 64 文字） |
 | `status` | TEXT | NOT NULL, `pending` / `ready` / `deleting` | 状態 |
 | `created_at` | INTEGER | NOT NULL | 作成日時 |
-| `updated_at` | INTEGER | NOT NULL | 状態を最後に変えた日時（作成時は `created_at` と同じ） |
+| `updated_at` | INTEGER | NOT NULL | 状態を最後に変えた日時（作成時は `created_at` と同じ）。2026-11-16 注記: 中身を置き換えたときにも更新する。`ready` の行では「今の内容が置かれた日時」（`ready` になった日時か、最後に置き換えた日時）を表し、API の `FileSummary.updatedAt` になる（[005](../005-replace-content/spec.md)） |
 
 - インデックス:
   - `UNIQUE (sha256) WHERE status != 'deleting'`（部分一意インデックス。削除中のものと同じ内容は置き直せる）
@@ -90,6 +90,16 @@
      続け、やり直さなくても定期実行が更新から 15 分を過ぎたものを片付ける
 - **中断したアップロードの置き直し**: 同じ `sha256` の `pending` があり、`updated_at` から 10 分を過ぎていれば、
   その R2 オブジェクト（あれば）と行を消してから新しく作る。10 分以内なら `409 upload_in_progress` を返す。
+- **中身の置き換え**（2026-11-16 追加。[005 の spec](../005-replace-content/spec.md) の「採る方式」）: `ready` のファイルの ID、
+  `created_at`、タグ、リンクはそのままで、中身を新しい内容にする。状態は `ready` のまま変わらない。
+  1. 新しい内容は、上限付きで作る `pending` の行（キーは `files/<id>/<新しい ID>`）に置き、R2 に保存する
+  2. D1 のバッチ（1 トランザクション）で、ファイルの行の `r2_key`・`name`・`content_type`・`size`・`sha256`・`updated_at` を
+     新しい内容に切り替え、1 の行を、元の内容（キー、名前、形式、サイズ、SHA-256）を持つ `deleting` の行にする。ファイルが `ready` で
+     `sha256` が置き換える前の値のまま、かつ 1 の行が作ってから 10 分以内のときだけ行う
+  3. そのファイルにリンクを発行したことがあれば、配信用のキャッシュを削除する（タグ `f:<id>`）
+  4. 元の内容の R2 オブジェクトを消してから、2 の `deleting` の行を消す
+  5. 途中で止まった場合は、1 の `pending` の行（30 分）か 2 の `deleting` の行（15 分）として残り、定期実行が片付ける。どの時点でも、
+     `ready` の行の `r2_key` には R2 のオブジェクトがある
 
 ### Link
 
