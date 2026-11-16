@@ -39,7 +39,7 @@
 ```ts
 type FileSummary = {
   id: string; name: string; contentType: string; size: number; sha256: string;
-  createdAt: string; tags: string[]; activeLinkCount: number;
+  createdAt: string; updatedAt: string; tags: string[]; activeLinkCount: number;
 };
 type Link = {
   token: string; fileId: string; url: string; label: string | null;
@@ -51,6 +51,8 @@ type TagCount = { tag: string; fileCount: number };
 ```
 
 - `Link.url` は `FILES_BASE_URL` + `/` + `token`（例: `https://kumo.meshnode.workers.dev/<token>`）。
+- 2026-11-16 注記: `FileSummary.updatedAt` を足した（[005 の spec](../../005-replace-content/spec.md)）。今の内容が置かれた日時で、
+  アップロードが終わった日時か、最後に中身を置き換えた日時。足しただけで、ほかの項目は変わらない。
 - `ready` 以外のファイルは、どのエンドポイントでも「存在しない」として扱う（削除のやり直しを除く）。
 
 ## エンドポイント
@@ -102,6 +104,31 @@ type TagCount = { tag: string; fileCount: number };
 - 200: ファイルの内容。`Content-Type` は保存時の値、
   `Content-Disposition: attachment; filename*=UTF-8''<元のファイル名>`（共通の防御用ヘッダーも付く）
 - 404 `not_found`
+- 2026-11-16 注記: R2 のオブジェクトは、D1 の `r2_key` で読む（置き換えたファイルのキーは `files/<id>` でない）。応答は変わらない。
+
+### `PUT /api/files/{id}/content` — 中身の置き換え（2026-11-16 追加）
+
+詳細は [005 の spec](../../005-replace-content/spec.md) の「管理 API の契約」。ファイルの ID、置いた日時、タグ、リンクはそのままで、
+中身・名前・形式・サイズ・SHA-256 を新しい内容にする。
+
+- 本文とヘッダー: `PUT /api/files` と同じ（`Content-Type`、`Content-Length`、`X-Kumodana-Sha256`、`X-Kumodana-Filename`）に加えて、
+  `If-Match: "<置き換える前の内容の SHA-256>"`（必須）
+- 処理順: ヘッダー検証 → 対象が `ready` か → 同じ内容なら何も変えない → `If-Match` の確認 → 同じ内容の別のファイルの確認 →
+  上限付きで新しい内容の `pending` を作成（上限は元の内容と新しい内容の合計で判定） → R2 の新しいキーへ保存 → D1 の 1 バッチで切り替え
+  （[data-model.md](../data-model.md) の「中身の置き換え」） → キャッシュの削除（タグ `f:<id>`。リンクを発行したことがあれば） →
+  元の内容の R2 オブジェクトと行を削除
+- 応答:
+  - 200 `{ "file": FileSummary, "replaced": true, "previous": { "name", "contentType", "size", "sha256" }, "purge": PurgeResult | null }`
+  - 200 `{ …, "replaced": false }` — 今と同じ内容（`If-Match` の値にかかわらない）。何も変えず、キャッシュの削除だけをやり直す
+  - 400 `invalid_request` — ヘッダーの形式が不正（`If-Match` がない・形が違う場合を含む）
+  - 404 `not_found` — ファイルがない、または `ready` でない
+  - 409 `upload_in_progress` — 同じ内容のアップロードが処理中
+  - 409 `duplicate_content` — 新しい内容が別のファイルとしてすでにある（`details: { fileId }`）
+  - 411 `length_required`、413 `file_too_large`、413 `quota_exceeded`、415 `unsupported_type`、422 `checksum_mismatch` — `PUT /api/files` と同じ
+  - 412 `precondition_failed` — `If-Match` が今の SHA-256 と違う
+  - 502 `storage_error` — R2 への保存に失敗した、または新しい内容の保存に 10 分以上かかった
+  - `200` 以外では何も変わらず、ファイルは元の内容のまま配信される。`purge.ok = false` は、配信側のキャッシュに元の内容が最長 1 時間
+    残る可能性があることを示す（置き換え自体は完了している）
 
 ### `DELETE /api/files/{id}`
 
@@ -148,9 +175,12 @@ type TagCount = { tag: string; fileCount: number };
   - `deleting` のまま `updated_at` から 15 分を超えたファイル（途中で止まった削除）: R2 のオブジェクト（あれば）と
     行を削除する
 - どちらも、途中で失敗したものは次回に再び処理する。
+- 2026-11-16 注記: 中身の置き換え（005）が途中で止まったときに残る `pending`・`deleting` の行とオブジェクトも、同じ規則で片付く。
 
 ## エラーコード一覧
 
 `unauthenticated`、`forbidden`、`cross_site_request`、`invalid_request`、`not_found`、`length_required`、
 `file_too_large`、`unsupported_type`、`quota_exceeded`、`upload_in_progress`、`checksum_mismatch`、
 `storage_error`、`invalid_tag`、`internal_error`
+
+2026-11-16 追加（[005](../../005-replace-content/spec.md)）: `duplicate_content`、`precondition_failed`
