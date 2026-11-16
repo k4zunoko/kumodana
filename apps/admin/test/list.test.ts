@@ -35,6 +35,7 @@ describe("GET /api/files", () => {
 			size: "content-aaaa000001".length,
 			sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
 			createdAt: new Date(1000).toISOString(),
+			updatedAt: new Date(1000).toISOString(),
 			tags: ["2026", "旅行"],
 			activeLinkCount: 1,
 		});

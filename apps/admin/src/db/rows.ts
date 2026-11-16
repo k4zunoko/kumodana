@@ -16,7 +16,7 @@ export type FileRow = {
 
 /** Columns for a FileSummary. Tags never contain control characters, so char(31) separates them safely. */
 export const SUMMARY_COLUMNS = `
-	f.id, f.name, f.content_type, f.size, f.sha256, f.created_at,
+	f.id, f.name, f.content_type, f.size, f.sha256, f.created_at, f.updated_at,
 	(SELECT group_concat(tag, char(31)) FROM (SELECT tag FROM file_tags WHERE file_id = f.id ORDER BY tag)) AS tags,
 	(SELECT COUNT(*) FROM links l WHERE l.file_id = f.id AND l.revoked_at IS NULL) AS active_links`;
 
@@ -27,6 +27,7 @@ export type SummaryRow = {
 	size: number;
 	sha256: string;
 	created_at: number;
+	updated_at: number;
 	tags: string | null;
 	active_links: number;
 };
@@ -39,6 +40,8 @@ export function toFileSummary(row: SummaryRow): FileSummary {
 		size: row.size,
 		sha256: row.sha256,
 		createdAt: new Date(row.created_at).toISOString(),
+		// For a ready file, updated_at is when its current content was put in place (specs/005-replace-content).
+		updatedAt: new Date(row.updated_at).toISOString(),
 		tags: row.tags ? row.tags.split("\u001f") : [],
 		activeLinkCount: row.active_links,
 	};

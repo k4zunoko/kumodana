@@ -8,6 +8,8 @@ export type NewFile = {
 	size: number;
 	sha256: string;
 	now: number;
+	/** The R2 key. `files/<id>` unless given (a replacement uses a new key each time, specs/005-replace-content). */
+	r2Key?: string;
 };
 
 export type InsertResult = "inserted" | "quota" | "duplicate" | "id_conflict";
@@ -24,7 +26,7 @@ export async function insertPendingWithinQuota(db: D1Database, file: NewFile, li
 				 SELECT ?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7
 				 WHERE (SELECT COALESCE(SUM(size), 0) FROM files) + ?5 <= ?8`,
 			)
-			.bind(file.id, `files/${file.id}`, file.name, file.contentType, file.size, file.sha256, file.now, limitBytes)
+			.bind(file.id, file.r2Key ?? `files/${file.id}`, file.name, file.contentType, file.size, file.sha256, file.now, limitBytes)
 			.run();
 		return result.meta.changes === 0 ? "quota" : "inserted";
 	} catch (error) {
@@ -131,4 +133,82 @@ export async function deleteFileRows(db: D1Database, id: string): Promise<void> 
 		db.prepare("DELETE FROM links WHERE file_id = ?").bind(id),
 		db.prepare("DELETE FROM files WHERE id = ? AND status != 'ready'").bind(id),
 	]);
+}
+
+export type ContentSwitch = {
+	/** The ready file whose content is replaced. Its ID, links, and tags stay. */
+	targetId: string;
+	/** Its SHA-256 before the replacement (the If-Match). The switch happens only while it is still this. */
+	expectedSha256: string;
+	/** The `pending` row that holds the new content (already stored in R2 under `r2Key`). */
+	pendingId: string;
+	r2Key: string;
+	name: string;
+	contentType: string;
+	size: number;
+	sha256: string;
+	now: number;
+};
+
+/** Marks a key that is moving between two rows inside one batch (`r2_key` is UNIQUE). Never visible outside it. */
+const MOVING = "moving:";
+
+/**
+ * Switches a ready file to new content in one batch (specs/005-replace-content). The pending row of the new content
+ * becomes a `deleting` row that holds the old content (key, name, type, size, SHA-256), and the file takes the new key
+ * and metadata. Both keys always have a row, so R2 objects are never left without one, and the file's key always has
+ * an object (constitution III). Nothing changes unless the file is still `ready` with `expectedSha256` and the
+ * pending row is still there. Returns whether the file was switched.
+ */
+export async function switchContent(db: D1Database, change: ContentSwitch): Promise<boolean> {
+	const results = await db.batch([
+		// 1. The pending row takes the old content. Its key gets a prefix until the file lets go of it.
+		db
+			.prepare(
+				`UPDATE files SET
+				   status = 'deleting',
+				   r2_key = ?3 || (SELECT r2_key FROM files WHERE id = ?1),
+				   name = (SELECT name FROM files WHERE id = ?1),
+				   content_type = (SELECT content_type FROM files WHERE id = ?1),
+				   size = (SELECT size FROM files WHERE id = ?1),
+				   sha256 = (SELECT sha256 FROM files WHERE id = ?1),
+				   updated_at = ?5
+				 WHERE id = ?2 AND status = 'pending' AND r2_key = ?4
+				   AND EXISTS (SELECT 1 FROM files WHERE id = ?1 AND status = 'ready' AND sha256 = ?6)`,
+			)
+			.bind(change.targetId, change.pendingId, MOVING, change.r2Key, change.now, change.expectedSha256),
+		// 2. The file takes the new content. Its ID, created_at, links, and tags stay.
+		db
+			.prepare(
+				`UPDATE files SET r2_key = ?3, name = ?4, content_type = ?5, size = ?6, sha256 = ?7, updated_at = ?8
+				 WHERE id = ?1 AND status = 'ready' AND sha256 = ?9
+				   AND EXISTS (SELECT 1 FROM files WHERE id = ?2 AND status = 'deleting' AND r2_key = ?10 || (SELECT r2_key FROM files WHERE id = ?1))`,
+			)
+			.bind(
+				change.targetId,
+				change.pendingId,
+				change.r2Key,
+				change.name,
+				change.contentType,
+				change.size,
+				change.sha256,
+				change.now,
+				change.expectedSha256,
+				MOVING,
+			),
+		// 3. The old key, now free, goes to the deleting row.
+		db
+			.prepare(
+				`UPDATE files SET r2_key = substr(r2_key, length(?3) + 1)
+				 WHERE id = ?2 AND status = 'deleting' AND substr(r2_key, 1, length(?3)) = ?3
+				   AND EXISTS (SELECT 1 FROM files WHERE id = ?1 AND r2_key = ?4)`,
+			)
+			.bind(change.targetId, change.pendingId, MOVING, change.r2Key),
+	]);
+	return (results[1]?.meta.changes ?? 0) > 0;
+}
+
+/** Removes the row left by a replacement (the old content). Call only after its R2 object is gone. */
+export async function deleteReplacedRow(db: D1Database, id: string): Promise<void> {
+	await db.prepare("DELETE FROM files WHERE id = ? AND status = 'deleting'").bind(id).run();
 }

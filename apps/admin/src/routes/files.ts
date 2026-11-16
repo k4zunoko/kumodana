@@ -1,4 +1,4 @@
-import { HEADER_FILENAME, HEADER_SHA256 } from "@kumodana/shared/api-types";
+import { type ContentSummary, HEADER_FILENAME, HEADER_SHA256, type PurgeResult } from "@kumodana/shared/api-types";
 import { contentDisposition } from "@kumodana/shared/http";
 import {
 	ALLOWED_CONTENT_TYPES,
@@ -8,11 +8,12 @@ import {
 	MAX_NAME_LENGTH,
 } from "@kumodana/shared/limits";
 import { newFileId } from "@kumodana/shared/ids";
-import type { Hono } from "hono";
+import type { Context, Hono, HonoRequest } from "hono";
 import type { AppEnv } from "../app.ts";
 import {
 	beginDeletion,
 	deleteFileRows,
+	deleteReplacedRow,
 	deleteRow,
 	findLiveBySha256,
 	getFileRow,
@@ -22,9 +23,11 @@ import {
 	listBySha256,
 	listFiles,
 	markReady,
+	type NewFile,
+	switchContent,
 } from "../db/files.ts";
 import { listLinks } from "../db/links.ts";
-import { toLink } from "../db/rows.ts";
+import { type FileRow, toLink } from "../db/rows.ts";
 import { getUsage } from "../db/usage.ts";
 import { ApiError } from "../errors.ts";
 import { normalizeTags } from "./tags.ts";
@@ -63,76 +66,122 @@ function isChecksumError(error: unknown): boolean {
 	return /sha-?256|checksum|digest|did not match/i.test(String(error));
 }
 
+type ContentHeaders = { contentType: string; size: number; sha256: string; name: string };
+
+/** The headers that describe uploaded content, shared by upload and replacement (contracts/admin-api.md). */
+function parseContentHeaders(req: HonoRequest): ContentHeaders {
+	const contentType = req.header("Content-Type") ?? "";
+	if (!isAllowedContentType(contentType)) {
+		throw new ApiError(415, "unsupported_type", undefined, { allowed: [...ALLOWED_CONTENT_TYPES] });
+	}
+	const lengthHeader = req.header("Content-Length");
+	if (lengthHeader === undefined) throw new ApiError(411, "length_required");
+	const size = Number(lengthHeader);
+	if (!Number.isInteger(size) || size < 1) throw new ApiError(400, "invalid_request", "Content-Length が不正です。");
+	if (size > MAX_FILE_BYTES) throw new ApiError(413, "file_too_large");
+	const sha256 = req.header(HEADER_SHA256) ?? "";
+	if (!SHA256_PATTERN.test(sha256)) {
+		throw new ApiError(400, "invalid_request", `${HEADER_SHA256} は小文字 16 進 64 文字にしてください。`);
+	}
+	return { contentType, size, sha256, name: parseFilename(req.header(HEADER_FILENAME)) };
+}
+
+/** `If-Match: "<sha256>"`, required for a replacement (specs/005-replace-content). */
+function parseIfMatch(value: string | undefined): string {
+	const match = /^"([0-9a-f]{64})"$/.exec(value?.trim() ?? "");
+	if (!match?.[1]) {
+		throw new ApiError(
+			400,
+			"invalid_request",
+			'If-Match に、置き換える前の内容の SHA-256 を "<小文字 16 進 64 文字>" の形で指定してください。',
+		);
+	}
+	return match[1];
+}
+
+/** A pending row with the same content: 409 while it may still be uploading, otherwise remove it (FR-008). */
+async function clearStalePending(env: Env, now: number, existing: FileRow): Promise<void> {
+	const age = now - existing.updated_at;
+	if (age < PENDING_GRACE_MS) {
+		throw new ApiError(409, "upload_in_progress", undefined, {
+			retryAfterSeconds: Math.ceil((PENDING_GRACE_MS - age) / 1000),
+		});
+	}
+	await env.BUCKET.delete(existing.r2_key);
+	await deleteRow(env.DB, existing.id);
+}
+
+/**
+ * Creates a `pending` row within the storage limit (FR-009), retrying once on an ID collision.
+ * `r2KeyFor` gives the R2 key for the new row's ID.
+ */
+async function createPendingRow(
+	env: Env,
+	file: Omit<NewFile, "id" | "r2Key">,
+	r2KeyFor: (id: string) => string,
+): Promise<{ id: string; r2Key: string }> {
+	let id = newFileId();
+	let inserted = await insertPendingWithinQuota(env.DB, { ...file, id, r2Key: r2KeyFor(id) }, storageLimit(env));
+	if (inserted === "id_conflict") {
+		id = newFileId();
+		inserted = await insertPendingWithinQuota(env.DB, { ...file, id, r2Key: r2KeyFor(id) }, storageLimit(env));
+	}
+	if (inserted === "quota") {
+		const usage = await getUsage(env.DB, storageLimit(env));
+		throw new ApiError(413, "quota_exceeded", undefined, {
+			usedBytes: usage.usedBytes,
+			limitBytes: usage.limitBytes,
+			requestedBytes: file.size,
+		});
+	}
+	if (inserted === "duplicate") throw new ApiError(409, "upload_in_progress");
+	if (inserted !== "inserted") throw new ApiError(500, "internal_error");
+	return { id, r2Key: r2KeyFor(id) };
+}
+
+/** Stores the body in R2, checked against its SHA-256. On failure the pending row is removed. */
+async function storeObject(
+	env: Env,
+	pending: { id: string; r2Key: string },
+	body: ReadableStream | null,
+	content: ContentHeaders,
+): Promise<void> {
+	try {
+		await env.BUCKET.put(pending.r2Key, body, { sha256: content.sha256, httpMetadata: { contentType: content.contentType } });
+	} catch (error) {
+		await deleteRow(env.DB, pending.id);
+		if (isChecksumError(error)) throw new ApiError(422, "checksum_mismatch");
+		console.error("R2 put failed", error);
+		throw new ApiError(502, "storage_error");
+	}
+}
+
+/** Purges a file's cached copies (tag `f:<id>`) if it ever had a link; null when there is nothing to purge. */
+async function purgeFile(c: Context<AppEnv>, id: string): Promise<PurgeResult | null> {
+	return (await hasEverHadLinks(c.env.DB, id)) ? c.get("deps").purge(c.env, [`f:${id}`]) : null;
+}
+
+function contentOf(row: FileRow): ContentSummary {
+	return { name: row.name, contentType: row.content_type, size: row.size, sha256: row.sha256 };
+}
+
 export function filesRoutes(app: Hono<AppEnv>): void {
 	app.put("/api/files", async (c) => {
 		const deps = c.get("deps");
-		const contentType = c.req.header("Content-Type") ?? "";
-		if (!isAllowedContentType(contentType)) {
-			throw new ApiError(415, "unsupported_type", undefined, { allowed: [...ALLOWED_CONTENT_TYPES] });
-		}
-		const lengthHeader = c.req.header("Content-Length");
-		if (lengthHeader === undefined) throw new ApiError(411, "length_required");
-		const size = Number(lengthHeader);
-		if (!Number.isInteger(size) || size < 1) throw new ApiError(400, "invalid_request", "Content-Length が不正です。");
-		if (size > MAX_FILE_BYTES) throw new ApiError(413, "file_too_large");
-		const sha256 = c.req.header(HEADER_SHA256) ?? "";
-		if (!SHA256_PATTERN.test(sha256)) {
-			throw new ApiError(400, "invalid_request", `${HEADER_SHA256} は小文字 16 進 64 文字にしてください。`);
-		}
-		const name = parseFilename(c.req.header(HEADER_FILENAME));
+		const content = parseContentHeaders(c.req);
 
-		const existing = await findLiveBySha256(c.env.DB, sha256);
+		const existing = await findLiveBySha256(c.env.DB, content.sha256);
 		if (existing?.status === "ready") {
 			const file = await getFileSummary(c.env.DB, existing.id);
 			return c.json({ file, duplicate: true }, 200);
 		}
-		if (existing?.status === "pending") {
-			const age = deps.now() - existing.updated_at;
-			if (age < PENDING_GRACE_MS) {
-				throw new ApiError(409, "upload_in_progress", undefined, {
-					retryAfterSeconds: Math.ceil((PENDING_GRACE_MS - age) / 1000),
-				});
-			}
-			// An interrupted upload of the same content: replace it (FR-008).
-			await c.env.BUCKET.delete(existing.r2_key);
-			await deleteRow(c.env.DB, existing.id);
-		}
+		// An interrupted upload of the same content is replaced after 10 minutes (FR-008).
+		if (existing?.status === "pending") await clearStalePending(c.env, deps.now(), existing);
 
-		let id = newFileId();
-		let inserted = await insertPendingWithinQuota(
-			c.env.DB,
-			{ id, name, contentType, size, sha256, now: deps.now() },
-			storageLimit(c.env),
-		);
-		if (inserted === "id_conflict") {
-			id = newFileId();
-			inserted = await insertPendingWithinQuota(
-				c.env.DB,
-				{ id, name, contentType, size, sha256, now: deps.now() },
-				storageLimit(c.env),
-			);
-		}
-		if (inserted === "quota") {
-			const usage = await getUsage(c.env.DB, storageLimit(c.env));
-			throw new ApiError(413, "quota_exceeded", undefined, {
-				usedBytes: usage.usedBytes,
-				limitBytes: usage.limitBytes,
-				requestedBytes: size,
-			});
-		}
-		if (inserted === "duplicate") throw new ApiError(409, "upload_in_progress");
-		if (inserted !== "inserted") throw new ApiError(500, "internal_error");
-
-		try {
-			await c.env.BUCKET.put(`files/${id}`, c.req.raw.body, { sha256, httpMetadata: { contentType } });
-		} catch (error) {
-			await deleteRow(c.env.DB, id);
-			if (isChecksumError(error)) throw new ApiError(422, "checksum_mismatch");
-			console.error("R2 put failed", error);
-			throw new ApiError(502, "storage_error");
-		}
-		await markReady(c.env.DB, id, deps.now());
-		return c.json({ file: await getFileSummary(c.env.DB, id), duplicate: false }, 201);
+		const pending = await createPendingRow(c.env, { ...content, now: deps.now() }, (id) => `files/${id}`);
+		await storeObject(c.env, pending, c.req.raw.body, content);
+		await markReady(c.env.DB, pending.id, deps.now());
+		return c.json({ file: await getFileSummary(c.env.DB, pending.id), duplicate: false }, 201);
 	});
 
 	app.get("/api/files", async (c) => {
@@ -194,5 +243,80 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 				"Content-Disposition": contentDisposition("attachment", row.name),
 			},
 		});
+	});
+
+	/**
+	 * Replacement (specs/005-replace-content): the file keeps its ID, links, and tags, and gets new content, name,
+	 * and type. The new content goes to a new key under a pending row (the limit counts old and new), then one batch
+	 * switches the file to it, only while the file is ready with the If-Match SHA-256, and leaves the old content as a
+	 * deleting row. Then: purge `f:<id>` if the file ever had a link (a failure is reported, the replacement stays),
+	 * and remove the old object and row. If this stops midway, the cron removes what is left. Until the switch, the
+	 * file keeps serving its old content.
+	 */
+	app.put("/api/files/:id/content", async (c) => {
+		const deps = c.get("deps");
+		const content = parseContentHeaders(c.req);
+		const expectedSha256 = parseIfMatch(c.req.header("If-Match"));
+		const target = await getFileRow(c.env.DB, c.req.param("id"));
+		if (!target || target.status !== "ready") throw new ApiError(404, "not_found");
+
+		// Already this content, for example a retry whose response was lost: change nothing and retry only the purge.
+		// RFC 9110 §13.1.1 allows a success when the requested change is already in place, whatever If-Match says.
+		if (content.sha256 === target.sha256) {
+			const purge = await purgeFile(c, target.id);
+			const file = await getFileSummary(c.env.DB, target.id);
+			if (!file) throw new ApiError(404, "not_found");
+			return c.json({ file, replaced: false, previous: contentOf(target), purge });
+		}
+		if (expectedSha256 !== target.sha256) throw new ApiError(412, "precondition_failed");
+
+		// Same content is stored once (FR-007), so content that another file has cannot become this file's.
+		const existing = await findLiveBySha256(c.env.DB, content.sha256);
+		if (existing?.status === "ready") throw new ApiError(409, "duplicate_content", undefined, { fileId: existing.id });
+		if (existing?.status === "pending") await clearStalePending(c.env, deps.now(), existing);
+
+		// A new key every time: going back to an earlier content must not meet its old object waiting for cleanup.
+		const pending = await createPendingRow(c.env, { ...content, now: deps.now() }, (id) => `files/${target.id}/${id}`);
+		await storeObject(c.env, pending, c.req.raw.body, content);
+
+		const switched = await switchContent(c.env.DB, {
+			targetId: target.id,
+			expectedSha256,
+			pendingId: pending.id,
+			r2Key: pending.r2Key,
+			name: content.name,
+			contentType: content.contentType,
+			size: content.size,
+			sha256: content.sha256,
+			now: deps.now(),
+		});
+		if (!switched) {
+			// Something else came first. Drop the new content; the file is as it was (the cron retries a failed drop).
+			try {
+				await c.env.BUCKET.delete(pending.r2Key);
+				await deleteRow(c.env.DB, pending.id);
+			} catch (error) {
+				console.error(`dropping the content for ${target.id} failed`, error);
+			}
+			const current = await getFileRow(c.env.DB, target.id);
+			if (!current || current.status !== "ready") throw new ApiError(404, "not_found");
+			if (current.sha256 !== expectedSha256) throw new ApiError(412, "precondition_failed");
+			// The pending row was taken over by another upload of the same content (FR-008).
+			throw new ApiError(409, "upload_in_progress");
+		}
+
+		const old = await getFileRow(c.env.DB, pending.id);
+		const purge = await purgeFile(c, target.id);
+		if (old) {
+			try {
+				await c.env.BUCKET.delete(old.r2_key);
+				await deleteReplacedRow(c.env.DB, old.id);
+			} catch (error) {
+				console.error(`removing the old content of ${target.id} failed; the cron removes it`, error);
+			}
+		}
+		const file = await getFileSummary(c.env.DB, target.id);
+		if (!file) throw new ApiError(404, "not_found");
+		return c.json({ file, replaced: true, previous: contentOf(old ?? target), purge });
 	});
 }
