@@ -1,11 +1,19 @@
 import { generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
-import { AUD, call, CLI_ID, OWNER, signAccessJwt, TEAM, testApp } from "./helpers.ts";
+import { authConfigFromEnv, authenticate } from "../src/auth.ts";
+import { AGENT_ID, AUD, call, CLI_ID, env, OWNER, signAccessJwt, TEAM, testApp, testKeys } from "./helpers.ts";
 
 const app = testApp();
 
 async function status(jwt: string | null): Promise<number> {
 	const res = await call(app, "GET", "/api/whoami-does-not-exist", { jwt });
+	return res.status;
+}
+
+/** Status for a service-token JWT with this common_name, optionally with some bindings replaced. */
+async function statusAs(commonName: string, bindings?: { AGENT_CLIENT_ID: string | undefined }): Promise<number> {
+	const jwt = await signAccessJwt({ common_name: commonName });
+	const res = await call(app, "GET", "/api/whoami-does-not-exist", { jwt, env: bindings });
 	return res.status;
 }
 
@@ -49,5 +57,34 @@ describe("Access JWT verification", () => {
 	it("uses the configured team and audience", () => {
 		expect(TEAM).toMatch(/^https:\/\//);
 		expect(AUD).not.toBe("");
+	});
+});
+
+describe("agent service token (specs/004-agent-service-token)", () => {
+	it("accepts the agent client ID as the cli principal, like the CLI client ID", async () => {
+		expect(AGENT_ID).not.toBe(CLI_ID);
+		expect(await statusAs(AGENT_ID)).toBe(404);
+		expect(await statusAs(CLI_ID)).toBe(404);
+
+		const request = new Request("https://admin.test/api/usage", {
+			headers: { "Cf-Access-Jwt-Assertion": await signAccessJwt({ common_name: AGENT_ID }) },
+		});
+		expect(await authenticate(request, authConfigFromEnv(env), testKeys)).toEqual({ kind: "cli", clientId: AGENT_ID });
+	});
+
+	it("still rejects other client IDs and an agent JWT that carries an email", async () => {
+		expect(await statusAs("other-client.access")).toBe(403);
+		expect(await status(await signAccessJwt({ common_name: AGENT_ID, email: "someone@example.com" }))).toBe(403);
+	});
+
+	it("accepts only the CLI client ID when AGENT_CLIENT_ID is empty or unset", async () => {
+		for (const agentClientId of ["", undefined]) {
+			const bindings = { AGENT_CLIENT_ID: agentClientId };
+			expect(authConfigFromEnv({ ...env, ...bindings } as Env).cliClientIds).toEqual([CLI_ID]);
+			expect(await statusAs(AGENT_ID, bindings)).toBe(403);
+			expect(await statusAs("other-client.access", bindings)).toBe(403);
+			expect(await statusAs("undefined", bindings)).toBe(403);
+			expect(await statusAs(CLI_ID, bindings)).toBe(404);
+		}
 	});
 });

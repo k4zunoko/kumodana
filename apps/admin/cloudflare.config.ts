@@ -25,6 +25,8 @@ export default defineConfig(({ mode }) => {
 				STORAGE_LIMIT_BYTES: bindings.text(isTest ? "1000" : "8000000000"),
 				OWNER_EMAIL: isTest ? bindings.text("owner@example.com") : bindings.secret(),
 				CLI_CLIENT_ID: isTest ? bindings.text("cli-client-id.access") : bindings.secret(),
+				// The resident agent's own service token (specs/004-agent-service-token). "" accepts only CLI_CLIENT_ID.
+				AGENT_CLIENT_ID: isTest ? bindings.text("agent-client-id.access") : bindings.secret(),
 				ACCESS_TEAM_DOMAIN: isTest ? bindings.text("https://test-team.cloudflareaccess.com") : bindings.secret(),
 				ACCESS_AUD: isTest ? bindings.text("test-aud") : bindings.secret(),
 			},

@@ -9,10 +9,14 @@ const { publicKey, privateKey } = await generateKeyPair("RS256");
 const jwk: JWK = { ...(await exportJWK(publicKey)), kid: "test-key", alg: "RS256" };
 const localKeys = createLocalJWKSet({ keys: [jwk] });
 
+/** The key resolver the test app uses: the local test key for any team domain. */
+export const testKeys = () => localKeys;
+
 export const TEAM = String(env.ACCESS_TEAM_DOMAIN);
 export const AUD = String(env.ACCESS_AUD);
 export const OWNER = String(env.OWNER_EMAIL);
 export const CLI_ID = String(env.CLI_CLIENT_ID);
+export const AGENT_ID = String(env.AGENT_CLIENT_ID);
 
 type Claims = { email?: string; common_name?: string; aud?: string; iss?: string; expiresIn?: string | number };
 
@@ -31,7 +35,7 @@ export async function signAccessJwt(claims: Claims = { common_name: CLI_ID }, ke
 export function testApp(overrides: Partial<Deps> = {}) {
 	return createApp(
 		{
-			keys: () => localKeys,
+			keys: testKeys,
 			purge: async () => ({ ok: true }),
 			now: () => Date.now(),
 			...overrides,
@@ -46,6 +50,8 @@ type CallOptions = {
 	json?: unknown;
 	jwt?: string | null;
 	client?: boolean;
+	/** Bindings to replace for this call only (for example, an unset AGENT_CLIENT_ID). */
+	env?: Partial<Record<keyof Env, unknown>>;
 };
 
 /** Calls the admin app like the CLI would (client header + CLI service-token JWT) unless overridden. */
@@ -65,7 +71,8 @@ export async function call(
 		body = JSON.stringify(options.json);
 	}
 	const ctx = createExecutionContext();
-	const response = await app.fetch(new Request(`https://admin.test${path}`, { method, headers, body }), env, ctx);
+	const callEnv = options.env ? ({ ...env, ...options.env } as Env) : env;
+	const response = await app.fetch(new Request(`https://admin.test${path}`, { method, headers, body }), callEnv, ctx);
 	await waitOnExecutionContext(ctx);
 	return response;
 }
