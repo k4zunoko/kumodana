@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetStorage, seed, TOKEN_A, TOKEN_B, TOKEN_C, TOKEN_D, TOKEN_UNKNOWN } from "./helpers.ts";
 
@@ -33,6 +33,32 @@ describe("delivery", () => {
 		expect(res.headers.get("Cache-Control")).toBe("public, max-age=60");
 		expect(res.headers.get("Cloudflare-CDN-Cache-Control")).toBe("public, max-age=3600, stale-if-error=0");
 		expect(res.headers.get("Cache-Tag")).toBe(`l:${TOKEN_A},f:file000001`);
+	});
+
+	it("serves a replaced file from its r2_key with the headers of its new content (specs/005-replace-content)", async () => {
+		// After a replacement, the row has the new key, name, type, size, and SHA-256; the links are unchanged.
+		const sha256 = "a".repeat(64);
+		await seed({
+			id: "file000001",
+			body: "new-png",
+			name: "地図-v2.png",
+			contentType: "image/png",
+			r2Key: "files/file000001/next000001",
+			sha256,
+			links: [{ token: TOKEN_A }, { token: TOKEN_B, revoked: true }],
+		});
+		await env.BUCKET.put("files/file000001", "<!doctype html><p>old"); // the old content, still waiting for cleanup
+		for (const method of ["GET", "HEAD"]) {
+			const res = await get(`/${TOKEN_A}`, method);
+			expect(res.status).toBe(200);
+			expect(await res.text()).toBe(method === "GET" ? "new-png" : "");
+			expect(res.headers.get("Content-Type")).toBe("image/png");
+			expect(res.headers.get("Content-Length")).toBe("7");
+			expect(res.headers.get("ETag")).toBe(`"${sha256}"`);
+			expect(res.headers.get("Content-Disposition")).toBe(`inline; filename*=UTF-8''${encodeURIComponent("地図-v2.png")}`);
+			expect(res.headers.get("Cache-Tag")).toBe(`l:${TOKEN_A},f:file000001`);
+		}
+		expect((await get(`/${TOKEN_B}`)).status).toBe(404);
 	});
 
 	it("answers HEAD without a body", async () => {
