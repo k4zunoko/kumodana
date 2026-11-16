@@ -1,6 +1,7 @@
 import type { FileDetailResponse, PurgeResult, ReplaceContentResponse } from "@kumodana/shared/api-types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { runCleanup } from "../src/cleanup.ts";
+import { switchContent } from "../src/db/files.ts";
 import { call, env, resetStorage, seedFile, sha256Hex, testApp } from "./helpers.ts";
 
 // specs/005-replace-content: PUT /api/files/{id}/content.
@@ -387,6 +388,66 @@ describe("PUT /api/files/:id/content", () => {
 		expect(after.keys).toEqual([after.rows[0]?.r2_key]);
 		expect(["first new content", "second new content"]).toContain((await delivered(ACTIVE))?.body);
 		await expectReadyRowsHaveObjects();
+	});
+});
+
+describe("a replacement that takes long or meets a deletion", () => {
+	it("does not switch to new content that took 10 minutes or more to store, and leaves nothing", async () => {
+		// Storing ends 10 minutes after the pending row was made: by then it may be taken over (FR-008).
+		const slow = {
+			put: async (key: string, value: ReadableStream | null, options?: R2PutOptions) => {
+				const object = await env.BUCKET.put(key, value, options);
+				now += 10 * MINUTE;
+				return object;
+			},
+			get: (key: string) => env.BUCKET.get(key),
+			head: (key: string) => env.BUCKET.head(key),
+			delete: (keys: string | string[]) => env.BUCKET.delete(keys),
+		};
+		const before = await storage();
+		const res = await replace(NEW, { env: { BUCKET: slow } });
+		expect(res.status).toBe(502);
+		expect(await res.json()).toMatchObject({ error: { code: "storage_error", message: expect.stringContaining("10 分") } });
+		expect(await storage()).toEqual(before);
+		expect((await delivered(ACTIVE))?.body).toBe(ORIGINAL);
+	});
+
+	it("deletes the new object when a replacement switched the file just before the deletion marked it", async () => {
+		// The pending row of a replacement, stored and about to be switched.
+		const newKey = `files/${TARGET}/pend000001`;
+		await seedFile({ id: "pend000001", status: "pending", body: NEW, r2Key: newKey, updatedAt: NOW });
+		let switched = false;
+		const db = {
+			prepare: (query: string) => env.DB.prepare(query),
+			batch: async (statements: D1PreparedStatement[]) => {
+				// The deletion has read the file (with its old key); the replacement switches right before it is marked.
+				if (!switched) {
+					switched = await switchContent(env.DB, {
+						targetId: TARGET,
+						expectedSha256: await sha256Hex(ORIGINAL),
+						pendingId: "pend000001",
+						r2Key: newKey,
+						name: "しおり-v2.png",
+						contentType: "image/png",
+						size: bytes(NEW),
+						sha256: await sha256Hex(NEW),
+						now: NOW,
+						maxPendingAgeMs: 10 * MINUTE,
+					});
+				}
+				return env.DB.batch(statements);
+			},
+		};
+		const res = await call(app, "DELETE", `/api/files/${TARGET}`, { env: { DB: db } });
+		expect(res.status).toBe(200);
+		expect(switched).toBe(true);
+		// The file and its new object are gone. The old content is the replacement's leftover row, for the cron.
+		expect(await storage()).toEqual({
+			rows: [{ id: "pend000001", status: "deleting", r2_key: `files/${TARGET}`, size: bytes(ORIGINAL) }],
+			keys: [`files/${TARGET}`],
+		});
+		await runCleanup(env, NOW + 16 * MINUTE);
+		expect(await storage()).toEqual({ rows: [], keys: [] });
 	});
 });
 

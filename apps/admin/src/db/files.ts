@@ -148,6 +148,11 @@ export type ContentSwitch = {
 	size: number;
 	sha256: string;
 	now: number;
+	/**
+	 * The pending row must be younger than this (updated after `now - maxPendingAgeMs`). An older one may already be
+	 * taken over by another upload of the same content or by the cleanup, which remove its object (FR-008).
+	 */
+	maxPendingAgeMs: number;
 };
 
 /** Marks a key that is moving between two rows inside one batch (`r2_key` is UNIQUE). Never visible outside it. */
@@ -158,7 +163,7 @@ const MOVING = "moving:";
  * becomes a `deleting` row that holds the old content (key, name, type, size, SHA-256), and the file takes the new key
  * and metadata. Both keys always have a row, so R2 objects are never left without one, and the file's key always has
  * an object (constitution III). Nothing changes unless the file is still `ready` with `expectedSha256` and the
- * pending row is still there. Returns whether the file was switched.
+ * pending row is still there and young enough. Returns whether the file was switched.
  */
 export async function switchContent(db: D1Database, change: ContentSwitch): Promise<boolean> {
 	const results = await db.batch([
@@ -173,10 +178,18 @@ export async function switchContent(db: D1Database, change: ContentSwitch): Prom
 				   size = (SELECT size FROM files WHERE id = ?1),
 				   sha256 = (SELECT sha256 FROM files WHERE id = ?1),
 				   updated_at = ?5
-				 WHERE id = ?2 AND status = 'pending' AND r2_key = ?4
+				 WHERE id = ?2 AND status = 'pending' AND r2_key = ?4 AND updated_at > ?7
 				   AND EXISTS (SELECT 1 FROM files WHERE id = ?1 AND status = 'ready' AND sha256 = ?6)`,
 			)
-			.bind(change.targetId, change.pendingId, MOVING, change.r2Key, change.now, change.expectedSha256),
+			.bind(
+				change.targetId,
+				change.pendingId,
+				MOVING,
+				change.r2Key,
+				change.now,
+				change.expectedSha256,
+				change.now - change.maxPendingAgeMs,
+			),
 		// 2. The file takes the new content. Its ID, created_at, links, and tags stay.
 		db
 			.prepare(
