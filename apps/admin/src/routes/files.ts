@@ -182,15 +182,16 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 	});
 
 	app.get("/api/files/:id/content", async (c) => {
-		const file = await getFileSummary(c.env.DB, c.req.param("id"));
-		if (!file) throw new ApiError(404, "not_found");
-		const object = await c.env.BUCKET.get(`files/${file.id}`);
+		const row = await getFileRow(c.env.DB, c.req.param("id"));
+		if (!row || row.status !== "ready") throw new ApiError(404, "not_found");
+		// The key comes from D1: a replaced file is no longer at files/<id> (specs/005-replace-content).
+		const object = await c.env.BUCKET.get(row.r2_key);
 		if (!object) throw new ApiError(404, "not_found");
 		return new Response(object.body, {
 			headers: {
-				"Content-Type": file.contentType,
-				"Content-Length": String(file.size),
-				"Content-Disposition": contentDisposition("attachment", file.name),
+				"Content-Type": row.content_type,
+				"Content-Length": String(row.size),
+				"Content-Disposition": contentDisposition("attachment", row.name),
 			},
 		});
 	});
