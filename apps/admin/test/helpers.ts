@@ -103,6 +103,8 @@ type SeedFile = {
 	updatedAt?: number;
 	tags?: string[];
 	withObject?: boolean;
+	/** The R2 key. `files/<id>` unless given (a replaced file has another key, specs/005-replace-content). */
+	r2Key?: string;
 };
 
 /** Inserts a file row directly (any status and timestamps) and, by default, its R2 object. */
@@ -110,13 +112,14 @@ export async function seedFile(file: SeedFile): Promise<void> {
 	const body = file.body ?? `content-${file.id}`;
 	const sha256 = file.sha256 ?? (await sha256Hex(body));
 	const createdAt = file.createdAt ?? Date.now();
+	const r2Key = file.r2Key ?? `files/${file.id}`;
 	await env.DB.prepare(
 		`INSERT INTO files (id, r2_key, name, content_type, size, sha256, status, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			file.id,
-			`files/${file.id}`,
+			r2Key,
 			file.name ?? `${file.id}.png`,
 			file.contentType ?? "image/png",
 			new TextEncoder().encode(body).length,
@@ -129,7 +132,7 @@ export async function seedFile(file: SeedFile): Promise<void> {
 	for (const tag of file.tags ?? []) {
 		await env.DB.prepare("INSERT INTO file_tags (file_id, tag) VALUES (?, ?)").bind(file.id, tag).run();
 	}
-	if (file.withObject !== false) await env.BUCKET.put(`files/${file.id}`, body);
+	if (file.withObject !== false) await env.BUCKET.put(r2Key, body);
 }
 
 export async function sha256Hex(data: string | ArrayBuffer | Uint8Array): Promise<string> {

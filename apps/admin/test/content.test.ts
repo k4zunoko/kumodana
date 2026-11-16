@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { call, resetStorage, seedFile, testApp } from "./helpers.ts";
+import { call, env, resetStorage, seedFile, testApp } from "./helpers.ts";
 
 const app = testApp();
 
@@ -17,6 +17,17 @@ describe("GET /api/files/:id/content", () => {
 		);
 		expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
 		expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+	});
+
+	it("reads the object at the file's r2_key, which is not files/<id> after a replacement", async () => {
+		await seedFile({ id: "file000002", name: "新しい.html", body: "<p>new", contentType: "text/html", r2Key: "files/file000002/next000001" });
+		await env.BUCKET.put("files/file000002", "<p>old");
+		const res = await call(app, "GET", "/api/files/file000002/content");
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe("<p>new");
+		expect(res.headers.get("Content-Type")).toBe("text/html");
+		expect(res.headers.get("Content-Length")).toBe("6");
+		expect(res.headers.get("Content-Disposition")).toBe(`attachment; filename*=UTF-8''${encodeURIComponent("新しい.html")}`);
 	});
 
 	it("returns 404 unless the file is ready", async () => {
