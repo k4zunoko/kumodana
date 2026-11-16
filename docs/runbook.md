@@ -38,7 +38,17 @@ npx cf d1 migrations apply <DATABASE_ID> --dir migrations
 
 スキーマを変えたときも同じコマンドを使う。ローカルの D1 はテストが毎回作り直すので、適用は不要。
 
-## 3. CLI 用サービストークン
+## 3. サービストークン
+
+サービストークンは、用途ごとに別々に発行する。どちらも管理用 Worker では同じ `cli` の主体（所有者と同じ操作ができる）として受け付けるが、
+Access のポリシー（§6）、管理用 Worker のシークレット（§4）、期限、`rotate`、取り消しは、トークンごとに別である。
+
+| トークン | 用途 | シークレットの置き場 | 管理用 Worker のシークレット |
+|---|---|---|---|
+| `kumodana-cli` | kumo CLI の退路（Issue #10） | どこにも保存しない（使うときに `rotate` する） | `CLI_CLIENT_ID` |
+| `kumodana-jolly`（名前の例） | 常駐エージェント Muse（Jolly）の専用（Issue #16） | Muse の資格情報ストア（登録済み接続）だけ | `AGENT_CLIENT_ID` |
+
+### CLI 用（退路）: `kumodana-cli`
 
 ```sh
 npx cf zero-trust access service-tokens create --name kumodana-cli --duration 8760h
@@ -55,6 +65,29 @@ npx cf zero-trust access service-tokens create --name kumodana-cli --duration 87
 - 有効期限（作成から 1 年。今のトークンは 2027-10-16）をカレンダーなどに記録する。退路を残すため、期限の前に延ばす。延長（シークレットは
   変わらない）は `npx cf zero-trust access service-tokens refresh <TOKEN_ID>`。期限の通知（Expiring Service Token Alert）は自動で作られている（§8）
 
+### エージェント用: `kumodana-jolly`
+
+ブラウザのない Linux の VM に常駐する、所有者の個人エージェント Muse（Jolly）専用のトークン（Issue #16 の決定、2026-11-16。
+[specs/004-agent-service-token](../specs/004-agent-service-token/spec.md)）。退路用の `kumodana-cli` は流用せず、`rotate` も共有しない。
+権限は絞らない（管理用 Worker の `cli` の主体と同じ）。2026-11-16 の時点では、まだ発行していない。
+
+```sh
+npx cf zero-trust access service-tokens create --name kumodana-jolly --duration 8760h
+```
+
+発行の手順は `kumodana-cli` と同じで、違うのは次の点。
+
+- 出力の `client_id` は、`.secrets.production.json` の `AGENT_CLIENT_ID`（§4）に入れて、管理用 Worker を再デプロイする（§5）。
+  Access アプリには、このトークンの Service Auth ポリシーを足す（§6「エージェント用サービストークンのポリシー」）
+- **`client_secret` は、Muse の資格情報ストア（登録済み接続）にだけ登録する**（§7「常駐エージェントで使う」）。エージェント側の平文ファイル、
+  チャット、リポジトリ、所有者の PC のファイルには置かない。ほかに控えも取らない（失くしたら `rotate` して登録し直す）
+- これは、上の「シークレットはどこにも保存しない」に対する、保管先を Muse の資格情報ストアに限った**例外**である。常駐するエージェントは、
+  使うたびに `rotate` できないため。**退路用 `kumodana-cli` の方針（どこにも保存しない）は変わらない**
+- `client_id` は識別子として、ヘルパー（エージェントが管理 API を呼ぶプログラム。このリポジトリの外）が要求に付ける。リポジトリには書かない
+- 期間は `8760h`（作成から 1 年）。発行したら、期限の日付をここと §10 に書き、カレンダーなどにも記録する。期限の前に `refresh` で延ばす
+  （シークレットは変わらないので、Muse 側の登録はそのままでよい）。§8 の期限の通知が、このトークンも対象にしているか（すべてのトークンか、
+  特定のトークンか）を確かめる
+
 ## 4. シークレットファイル
 
 リポジトリのルートに `.secrets.production.json` を作る（`.gitignore` 済み。**コミットしない**）。
@@ -63,9 +96,14 @@ npx cf zero-trust access service-tokens create --name kumodana-cli --duration 87
 | キー | 値 |
 |---|---|
 | `OWNER_EMAIL` | 自分のメールアドレス（Access でログインするもの） |
-| `CLI_CLIENT_ID` | 手順 3 の `client_id` |
+| `CLI_CLIENT_ID` | 手順 3 の `kumodana-cli` の `client_id` |
+| `AGENT_CLIENT_ID` | 手順 3 の `kumodana-jolly`（エージェント用）の `client_id`。空（`""`）なら `CLI_CLIENT_ID` だけが通る |
 | `ACCESS_TEAM_DOMAIN` | `https://<チーム名>.cloudflareaccess.com` |
 | `ACCESS_AUD` | 手順 6 で作る Access アプリの AUD。初回は仮の値（例: `pending`）でよい（すべて拒否される） |
+
+`AGENT_CLIENT_ID` は、ほかのキーと同じく `bindings.secret()`（必須のシークレット）で宣言している（004）。キーを省くと、デプロイが
+「required secrets have not been set」で止まる見込みなので、エージェント用サービストークンを発行する前にデプロイするときも、キーは残して
+`""` にする。
 
 ## 5. デプロイ
 
@@ -83,6 +121,8 @@ npm run deploy -w @kumodana/admin   # 管理用 Worker（--secrets-file を付�
 2026-10-16 に下記「API で設定する場合」の手順で作成済み（アプリ名 `kumodana-admin`、ポリシー `owner` と
 `kumodana-cli`）。ブラウザでのログインは Cloudflare アカウントでのログイン（Zero Trust の既定の
 ログイン方法）を使う。`kumo login` のための Managed OAuth の設定は、下の「Managed OAuth（`kumo login` 用）」にある。
+エージェント用サービストークン（§3）のポリシー `kumodana-jolly` は、下の「エージェント用サービストークンのポリシー」で足す（Issue #16。
+2026-11-16 の時点では、まだ足していない）。
 
 ### ダッシュボードで設定する
 
@@ -117,6 +157,29 @@ npx cf zero-trust access applications create --body "@C:\path\to\access-app.json
 ```
 
 Windows の Git Bash では `--body "$(cat ...)"` が JSON として解釈されないため、`@<Windows のパス>` で渡す。
+
+### エージェント用サービストークンのポリシー（`kumodana-jolly`）
+
+§3 のエージェント用サービストークンを発行した後に、`kumodana-admin` に、このトークンだけを含む Service Auth ポリシーを足す
+（Issue #16、[specs/004-agent-service-token](../specs/004-agent-service-token/spec.md)）。既存のポリシー（`owner`・`kumodana-cli`）と、
+Managed OAuth の設定は変えない。
+
+1. Zero Trust → Access controls → Applications → `kumodana-admin` → 編集（⋯ → Edit）
+2. ポリシーを追加する。名前: `kumodana-jolly`、Action: **Service Auth**、Include: **Service Token** = `kumodana-jolly`
+3. 保存し、`npx cf zero-trust access applications get <app-id>` で、ポリシーが `owner`・`kumodana-cli`・`kumodana-jolly` の 3 つになり、
+   `oauth_configuration` とアプリのセッション（24h）が変わっていないことを確かめる
+
+API で足す場合は、下の「Managed OAuth」の「API で設定する」と同じ手順（`get` で控える → 控えに足す → `--dry-run` → `update` →
+もう一度 `get` して比べる）で、`policies` に次の 1 件を足す。`<AGENT_TOKEN_ID>` は `npx cf zero-trust access service-tokens list` で確かめる。
+この経路は、まだ試していない（2026-11-16 時点）。
+
+```json
+{ "name": "kumodana-jolly", "decision": "non_identity", "include": [{ "service_token": { "token_id": "<AGENT_TOKEN_ID>" } }] }
+```
+
+- 入口（このポリシー）と処理の本体（管理用 Worker の `AGENT_CLIENT_ID`、§4）がそろって、初めて通る。ポリシーだけでは、管理用 Worker が
+  `403 forbidden` を返す
+- このポリシーを外すと、このトークンだけが入口で拒否される（取り消しの方法の 1 つ。§7「常駐エージェントで使う」）
 
 ### Managed OAuth（`kumo login` 用）
 
@@ -170,7 +233,8 @@ Windows の Git Bash では `--body "$(cat ...)"` が JSON として解釈され
 #### API で確かめる
 
 `npx cf zero-trust access applications get <app-id>` の出力の `oauth_configuration` を見る。2026-10-21 の値は次のとおり
-（ダッシュボードでは 15 minutes と 1 week と表示される）。ポリシー（`owner`・`kumodana-cli`）とアプリのセッション（24h）も、変わっていないことを確かめる。
+（ダッシュボードでは 15 minutes と 1 week と表示される）。ポリシー（`owner`・`kumodana-cli`。エージェント用を足した後は `kumodana-jolly` も）と
+アプリのセッション（24h）も、変わっていないことを確かめる。
 
 ```json
 {"enabled":true,"grant":{"session_duration":"168h","access_token_lifetime":"15m"},"dynamic_client_registration":{"enabled":true,"allowed_uris":[],"allow_any_on_localhost":false,"allow_any_on_loopback":true}}
@@ -244,8 +308,9 @@ kumo usage                   # 使用量が表示されれば設定は完了
 
 ### サービストークンで使う（退路）
 
-ブラウザのない環境で使うときや、Managed OAuth が使えなくなったときは、§3 のサービストークンを、使う環境の環境変数に一時的に設定して使う。
-シークレットはどこにも保存していないので、使うたびに再発行する（Issue #10 の決定、2026-10-21）。
+ブラウザのない環境で一時的に使うときや、Managed OAuth が使えなくなったときは、§3 の CLI 用サービストークン（`kumodana-cli`）を、使う環境の
+環境変数に一時的に設定して使う。シークレットはどこにも保存していないので、使うたびに再発行する（Issue #10 の決定、2026-10-21）。
+ブラウザのない環境に常駐するエージェントは、これではなく、下の「常駐エージェントで使う」の専用のトークンを使う。
 
 1. シークレットを再発行する。前のシークレットはすぐ使えなくなる
 
@@ -286,9 +351,66 @@ kumo usage                   # 使用量が表示されれば設定は完了
 
 ### シークレットの保管と再発行
 
-`clientSecret` は発行時に一度しか表示されない。**どこにも保存しない**（§3）。要るときは、上の手順で `rotate` して得て、使い終わったら消す。
+`clientSecret` は発行時に一度しか表示されない。退路用 `kumodana-cli` のシークレットは**どこにも保存しない**（§3。エージェント用は
+下の「常駐エージェントで使う」）。要るときは、上の手順で `rotate` して得て、使い終わったら消す。
 漏れたかもしれないときも `rotate` する（前のシークレットはすぐ使えなくなる）。期限（2027-10-16）が近いときは、シークレットが変わらない
 §3 の `refresh` で延ばす。どちらも `clientId` は変わらないため、Worker の再デプロイは要らない。
+
+### 常駐エージェントで使う（エージェント用サービストークン）
+
+ブラウザのない環境に常駐するエージェント（所有者の個人エージェント Muse / Jolly）は、`kumo login` でも退路の `kumodana-cli` でもなく、
+§3 のエージェント用サービストークン（`kumodana-jolly`）で管理 API を使う（Issue #16 の決定、2026-11-16。
+[specs/004-agent-service-token](../specs/004-agent-service-token/spec.md)）。`kumo` CLI は変えていない。エージェントは、管理 API を直接呼ぶ
+ヘルパー（このリポジトリの外）から使う。使い始めるまでの順序は、§3 で発行 → §6 でポリシーを足す → §4 の `AGENT_CLIENT_ID` に入れて
+§5 で再デプロイ → 下の「保管」で Muse に登録。
+
+#### ヘルパーが送るもの
+
+すべての `/api/*` の要求に、次のヘッダーを付ける。エンドポイントと、アップロードに要るヘッダー（`X-Kumodana-Sha256` など）は、
+[001 の contracts/admin-api.md](../specs/001-share-shelf-mvp/contracts/admin-api.md) にある。
+
+| ヘッダー | 値 |
+|---|---|
+| `CF-Access-Client-Id` | `kumodana-jolly` の `client_id`（識別子。ヘルパーが付ける） |
+| `CF-Access-Client-Secret` | `kumodana-jolly` の `client_secret`（Muse の資格情報ストアから取り出す） |
+| `X-Kumodana-Client` | `cli`（管理 API の CSRF 対策。ないと `403 cross_site_request`） |
+
+- `Origin` は付けない（付けると `403 cross_site_request`）。`client_secret` は、出力、ログ、エラーに出さない
+- 確かめ方: `GET /api/usage` が 200 で使用量を返せば、入口（Access）と処理の本体（管理用 Worker）の両方を通っている
+  - 401 か 403 で、本文が管理 API のエラーの JSON（`{"error": …}`）でない: 入口で拒否された。シークレット、期限、§6 のポリシーを確かめる
+  - 403 で `{"error":{"code":"forbidden", …}}`: 入口は通ったが、管理用 Worker が受け付けていない。§4 の `AGENT_CLIENT_ID` と、§5 の
+    再デプロイを確かめる
+- 置くもの: 憲法 IV・VII は、ヘルパーから置くものにも及ぶ。Markdown 文書とテキストは、`kumo preview <file> -o <path>`（管理 API を
+  使わない）で HTML に変換してから置く。画像と SVG は、メタデータ（位置情報など）を取り除いたものだけを置く。取り除く手段がない間は、
+  ヘルパーで画像と SVG を置かない
+
+#### 保管
+
+- `client_secret` は、Muse の資格情報ストア（登録済み接続）にだけ登録する。エージェント側の平文ファイル、チャット、リポジトリには
+  置かない（§3 の例外。退路用 `kumodana-cli` の方針は変わらない）
+- `client_id` は、識別子としてヘルパーの設定に置く。Muse の資格情報ストアに置くのは `client_secret` だけ
+- 発行や `rotate` のときに表示された `client_secret` は、登録が済んだら控えずに捨てる
+
+#### 延長・入れ直し・取り消し
+
+```sh
+npx cf zero-trust access service-tokens list                        # kumodana-jolly の <service_token_id> を確認
+npx cf zero-trust access service-tokens refresh <service_token_id>  # 延長（1 年。シークレットは変わらない）
+npx cf zero-trust access service-tokens rotate <service_token_id>   # 入れ直し（前のシークレットはすぐ使えなくなる）
+npx cf zero-trust access service-tokens delete <service_token_id>   # 取り消し（トークンを消す）
+```
+
+- **延長**: 期限の前に `refresh` する。シークレットは変わらないので、Muse 側の登録はそのままでよい。新しい期限を §3 と §10 に書く
+- **入れ直し**: 漏れたかもしれないときは `rotate` し、出力の `client_secret` を Muse の資格情報ストアに登録し直す。登録し直すまで、
+  エージェントは入口で拒否される。`client_id` は変わらないので、管理用 Worker の再デプロイは要らない
+- **取り消し**: エージェントを止めるときや、VM や資格情報ストアが漏れたかもしれないときは、`delete` でトークンを消すか、§6 の
+  ポリシー `kumodana-jolly` を外す。Strict service token authentication（§6 の 5）が有効なとき、Access は Cookie（`CF_Authorization`）を
+  返さず、要求のたびにヘッダーで確かめるので、次の要求から入口で拒否される見込み（実地では未確認。§12）。続けて、Muse の
+  資格情報ストアの登録を消す。作り直さないなら、`AGENT_CLIENT_ID` を `""` にして再デプロイし、処理の本体でも受け付けないようにする
+- どれも `kumodana-jolly` だけが対象で、所有者の PC のログイン（`kumo login`）と退路用 `kumodana-cli` には影響しない。逆に、
+  `kumodana-cli` を `rotate` しても、エージェントは止まらない
+- 作り直した（消して新しく発行した）ときは、`client_id` が変わるので、`AGENT_CLIENT_ID` を更新して再デプロイし、§6 のポリシーも
+  新しいトークンに向ける。ヘルパーの設定の `client_id` も入れ替える
 
 ## 8. 予算アラートと使用量の通知（憲法 V、FR-038）
 
@@ -322,7 +444,9 @@ npm run resume -w @kumodana/files   # 再開
 | ログインの確認 | `kumo login --status`（使われる資格情報とログインの状態。通信しない）。使えるかは `kumo usage` |
 | ログインし直す | `kumo login`（許可の期間が過ぎたとき、取り消されたとき。§7） |
 | PC の許可を手放す | その PC で `kumo logout`。PC をなくしたときは §7 の `revoke-tokens` か `users revoke` |
-| サービストークンの更新 | 期限（2027-10-16）の前に、§3 の `refresh` で延ばす（シークレットは変わらない。退路を残すため）。シークレットは保存しないので、退路として使うときに §7 の `rotate` で再発行する。トークンを作り直した場合は `CLI_CLIENT_ID` を更新して再デプロイ |
+| CLI 用サービストークン（退路、`kumodana-cli`）の更新 | 期限（2027-10-16）の前に、§3 の `refresh` で延ばす（シークレットは変わらない。退路を残すため）。シークレットは保存しないので、退路として使うときに §7 の `rotate` で再発行する。トークンを作り直した場合は `CLI_CLIENT_ID` を更新して再デプロイ |
+| エージェント用サービストークン（`kumodana-jolly`）の延長 | 期限（発行から 1 年。発行したら日付を §3 とここに書く）の前に、§7「常駐エージェントで使う」の `refresh` で延ばす（シークレットは変わらないので、Muse 側の登録はそのまま）。漏れたかもしれないときは `rotate` して、Muse の資格情報ストアに登録し直す（再デプロイは要らない） |
+| エージェント用サービストークン（`kumodana-jolly`）の取り消し | `delete` でトークンを消すか、§6 のポリシー `kumodana-jolly` を外す（§7）。Muse の登録も消す。所有者のログインと `kumodana-cli` には影響しない。作り直さないなら `AGENT_CLIENT_ID` を `""` にして再デプロイ |
 | Markdown の変換器の更新 | `markdown-it` と `@mdit/plugin-tasklist`（`apps/cli` の依存）のセキュリティ修正は、公開から 7 日経ってから `npm install -w kumodana-cli --save-exact markdown-it@<版>` で上げ、`npm test` を通して `npm install -g ./apps/cli` し直す。Worker のデプロイは要らない。置いた文書は自動では変わらない（置き直すと別のファイルになる） |
 
 ## 11. 検証の記録（research.md の確認事項。001 の T030・T082、003 の T038）
@@ -400,6 +524,10 @@ T035 は、所有者の PC で `APPDATA` を一時フォルダーに向けて行
 | すでに無効な許可での `kumo logout` | 最初の実装は `revoke_failed`（終了コード 1）で「許可は期間が切れるまで有効です」と誤って案内した。Access が `400 invalid_grant` を返すためで、PR #12 で「この PC の許可はすでに無効でした」（終了コード 0）に直した。2 回目の `kumo logout` は「ログインしていません。」（終了コード 0） |
 | SC-007 | `APPDATA` を元に戻すと、`config.json` のサービストークンで `kumo usage` が成功した（T035 の時点。その後、#10 の決定で `config.json` からシークレットを削除した）。ブラウザらしい要求は、今までどおり Access のログイン画面へ 302 |
 | 最終的な値（T036） | 新しい値でログインすると、アクセストークンの期限は発行から 15 分だった。`kumo usage` は成功し、`kumo logout` は「この PC の許可を取り消しました」で終了コード 0 |
+
+### 004: エージェント用サービストークン
+
+未実施（接続の実装後に記録）。
 
 ## 13. 既知の問題
 
