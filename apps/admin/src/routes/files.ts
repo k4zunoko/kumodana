@@ -224,8 +224,11 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 		const row = await getFileRow(c.env.DB, c.req.param("id"));
 		if (!row || row.status === "pending") throw new ApiError(404, "not_found");
 		const revokedLinks = row.status === "ready" ? await beginDeletion(c.env.DB, row.id, deps.now()) : 0;
+		// The key of a deleting file no longer changes. Read it again: a replacement may have switched it just before
+		// (specs/005-replace-content), and the old key now belongs to the replacement's leftover row.
+		const r2Key = (await getFileRow(c.env.DB, row.id))?.r2_key ?? row.r2_key;
 		const purge = (await hasEverHadLinks(c.env.DB, row.id)) ? await deps.purge(c.env, [`f:${row.id}`]) : null;
-		await c.env.BUCKET.delete(row.r2_key);
+		await c.env.BUCKET.delete(r2Key);
 		await deleteFileRows(c.env.DB, row.id);
 		return c.json({ deleted: row.id, revokedLinks, purge });
 	});
@@ -248,10 +251,11 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 	/**
 	 * Replacement (specs/005-replace-content): the file keeps its ID, links, and tags, and gets new content, name,
 	 * and type. The new content goes to a new key under a pending row (the limit counts old and new), then one batch
-	 * switches the file to it, only while the file is ready with the If-Match SHA-256, and leaves the old content as a
-	 * deleting row. Then: purge `f:<id>` if the file ever had a link (a failure is reported, the replacement stays),
-	 * and remove the old object and row. If this stops midway, the cron removes what is left. Until the switch, the
-	 * file keeps serving its old content.
+	 * switches the file to it and leaves the old content as a deleting row. The switch happens only while the file is
+	 * ready with the If-Match SHA-256 and the pending row is younger than 10 minutes (an older one may be taken over,
+	 * FR-008). Then: purge `f:<id>` if the file ever had a link (a failure is reported, the replacement stays), and
+	 * remove the old object and row. If this stops midway, the cron removes what is left. Until the switch, the file
+	 * keeps serving its old content.
 	 */
 	app.put("/api/files/:id/content", async (c) => {
 		const deps = c.get("deps");
@@ -289,6 +293,7 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 			size: content.size,
 			sha256: content.sha256,
 			now: deps.now(),
+			maxPendingAgeMs: PENDING_GRACE_MS,
 		});
 		if (!switched) {
 			// Something else came first. Drop the new content; the file is as it was (the cron retries a failed drop).
@@ -301,8 +306,12 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 			const current = await getFileRow(c.env.DB, target.id);
 			if (!current || current.status !== "ready") throw new ApiError(404, "not_found");
 			if (current.sha256 !== expectedSha256) throw new ApiError(412, "precondition_failed");
-			// The pending row was taken over by another upload of the same content (FR-008).
-			throw new ApiError(409, "upload_in_progress");
+			// Storing took 10 minutes or more, so the pending row may have been taken over (FR-008).
+			throw new ApiError(
+				502,
+				"storage_error",
+				"新しい内容の保存に 10 分以上かかったため、置き換えていません。もう一度置き換えてください。",
+			);
 		}
 
 		const old = await getFileRow(c.env.DB, pending.id);
