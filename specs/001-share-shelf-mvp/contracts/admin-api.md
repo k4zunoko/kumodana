@@ -75,6 +75,8 @@ type TagCount = { tag: string; fileCount: number };
   - `ready` がある → 本文を読まずに 200（`duplicate: true`）
   - `pending` があり、更新から 10 分以内 → 409 `upload_in_progress`（`details: { retryAfterSeconds }`）
   - `pending` があり、更新から 10 分を超えている → その R2 オブジェクトと行を消してから続行
+    - 2026-11-17 注記: 消すのは、その行を読んだときのまま D1 の 1 文で確保できたときだけ（data-model.md の「中断したアップロードの
+      置き直し」）。確保できなければ何も消さず、同じ内容をもう一度確かめる（`ready` になっていれば 200（`duplicate: true`））
 - 応答:
   - 201 `{ "file": FileSummary, "duplicate": false }`
   - 200 `{ "file": FileSummary, "duplicate": true }`
