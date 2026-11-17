@@ -1,8 +1,8 @@
 import type { FileDetailResponse, PurgeResult, ReplaceContentResponse } from "@kumodana/shared/api-types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { runCleanup } from "../src/cleanup.ts";
-import { switchContent } from "../src/db/files.ts";
-import { call, env, resetStorage, seedFile, sha256Hex, testApp } from "./helpers.ts";
+import { claimStalePending, switchContent } from "../src/db/files.ts";
+import { call, deferred, env, lateFirstLookup, resetStorage, seedFile, sha256Hex, testApp } from "./helpers.ts";
 
 // specs/005-replace-content: PUT /api/files/{id}/content.
 
@@ -45,6 +45,8 @@ type ReplaceOptions = {
 	/** The If-Match header; null leaves it out. Defaults to the SHA-256 of ORIGINAL in quotes. */
 	ifMatch?: string | null;
 	env?: Partial<Record<keyof Env, unknown>>;
+	/** The app to call. Defaults to the one above. */
+	app?: ReturnType<typeof testApp>;
 };
 
 async function replace(body: string, options: ReplaceOptions = {}): Promise<Response> {
@@ -57,7 +59,7 @@ async function replace(body: string, options: ReplaceOptions = {}): Promise<Resp
 	};
 	const ifMatch = options.ifMatch === undefined ? `"${await sha256Hex(ORIGINAL)}"` : options.ifMatch;
 	if (ifMatch !== null) headers["If-Match"] = ifMatch;
-	return call(app, "PUT", `/api/files/${options.id ?? TARGET}/content`, { headers, body: bytes, env: options.env });
+	return call(options.app ?? app, "PUT", `/api/files/${options.id ?? TARGET}/content`, { headers, body: bytes, env: options.env });
 }
 
 async function detail(id = TARGET): Promise<FileDetailResponse> {
@@ -448,6 +450,180 @@ describe("a replacement that takes long or meets a deletion", () => {
 		});
 		await runCleanup(env, NOW + 16 * MINUTE);
 		expect(await storage()).toEqual({ rows: [], keys: [] });
+	});
+});
+
+describe("another request whose lookup of the new content arrives after the switch", () => {
+	// The order found in the review of PR #27: another request with the same content reads the replacement's pending row
+	// when it is 9:59.9 old, the replacement switches the file to it before 10 minutes, and the lookup arrives 200 ms
+	// late, when the row looks 10 minutes old. The other request must not remove the object the file now has
+	// (constitution III), nor the row that now holds the old content.
+	async function raceWithReplacement(other: (db: unknown) => Promise<Response>) {
+		const stored = deferred(); // the replacement has made its pending row (at NOW) and stored the new content
+		const looked = deferred(); // the other request has read that pending row
+		const switched = deferred(); // the replacement has switched the file and purges before removing the old content
+		const otherDone = deferred();
+
+		const replacing = testApp({
+			now: () => now,
+			purge: async () => {
+				switched.resolve();
+				await otherDone.promise;
+				return { ok: true };
+			},
+		});
+		const waitsAfterStoring = {
+			put: async (key: string, value: ReadableStream | null, options?: R2PutOptions) => {
+				const object = await env.BUCKET.put(key, value, options);
+				stored.resolve();
+				await looked.promise;
+				return object;
+			},
+			get: (key: string) => env.BUCKET.get(key),
+			head: (key: string) => env.BUCKET.head(key),
+			delete: (keys: string | string[]) => env.BUCKET.delete(keys),
+		};
+		// The other request's first lookup by SHA-256 reads D1 at 9:59.9 and arrives after the switch, at 10:00.1.
+		const late = lateFirstLookup(async () => {
+			looked.resolve();
+			await switched.promise;
+			now = NOW + 10 * MINUTE + 100;
+		});
+
+		const replacement = replace(NEW, { app: replacing, env: { BUCKET: waitsAfterStoring } });
+		await stored.promise;
+		now = NOW + 10 * MINUTE - 100;
+		const otherResponse = await other(late.db);
+		const whenOtherDone = await storage();
+		otherDone.resolve();
+		const replaced = await replacement;
+
+		// The lookup that arrived late saw the pending row of the new content, made at NOW.
+		const seen = late.lookups[0] as (Row & { sha256: string; updated_at: number }) | null;
+		expect(seen).toMatchObject({ status: "pending", sha256: await sha256Hex(NEW), updated_at: NOW });
+		// When the other request was done, the file had its new object (the row's old key), and the row still held the
+		// old content with its object, for the replacement to remove.
+		const file = whenOtherDone.rows.find((r) => r.id === TARGET);
+		expect(file).toMatchObject({ status: "ready", r2_key: seen?.r2_key, size: bytes(NEW) });
+		expect(whenOtherDone.keys).toContain(seen?.r2_key);
+		expect(whenOtherDone.rows).toContainEqual({
+			id: seen?.id,
+			status: "deleting",
+			r2_key: `files/${TARGET}`,
+			size: bytes(ORIGINAL),
+		});
+		expect(whenOtherDone.keys).toContain(`files/${TARGET}`);
+		return { replaced, other: otherResponse };
+	}
+
+	/** The file has the new content and its object; the old content and the pending row are gone. */
+	async function expectReplacedAndClean(others: Row[] = [], otherKeys: string[] = []): Promise<void> {
+		await expectReadyRowsHaveObjects();
+		expect((await delivered(ACTIVE))?.body).toBe(NEW);
+		const after = await storage();
+		const file = after.rows.find((r) => r.id === TARGET);
+		expect(file).toMatchObject({ status: "ready", size: bytes(NEW) });
+		expect(file?.r2_key).toMatch(new RegExp(`^files/${TARGET}/`));
+		expect(after).toEqual({
+			rows: [file, ...others].sort((a, b) => (a?.id ?? "").localeCompare(b?.id ?? "")),
+			keys: [file?.r2_key, ...otherKeys].sort(),
+		});
+	}
+
+	it("an upload of the same content: answers that the file has it, and the file keeps its new object", async () => {
+		const { replaced, other } = await raceWithReplacement(async (db) => {
+			const body = new TextEncoder().encode(NEW);
+			const headers = {
+				"Content-Type": "image/png",
+				"Content-Length": String(body.length),
+				"X-Kumodana-Sha256": await sha256Hex(body),
+				"X-Kumodana-Filename": "same.png",
+			};
+			return call(app, "PUT", "/api/files", { headers, body, env: { DB: db } });
+		});
+		await expectReplacedAndClean();
+		expect(replaced.status).toBe(200);
+		expect(await replaced.json()).toMatchObject({ replaced: true, file: { id: TARGET } });
+		expect(other.status).toBe(200);
+		expect(await other.json()).toMatchObject({ duplicate: true, file: { id: TARGET, sha256: await sha256Hex(NEW) } });
+	});
+
+	it("a replacement of another file with the same content: answers 409 with this file's ID, and changes neither", async () => {
+		await seedFile({ id: "dddd000001", body: "other file" });
+		const { replaced, other } = await raceWithReplacement(async (db) =>
+			replace(NEW, { id: "dddd000001", ifMatch: `"${await sha256Hex("other file")}"`, env: { DB: db } }),
+		);
+		const otherFile = { id: "dddd000001", status: "ready", r2_key: "files/dddd000001", size: bytes("other file") };
+		await expectReplacedAndClean([otherFile], ["files/dddd000001"]);
+		expect(replaced.status).toBe(200);
+		expect(await replaced.json()).toMatchObject({ replaced: true, file: { id: TARGET } });
+		expect(other.status).toBe(409);
+		expect(await other.json()).toMatchObject({ error: { code: "duplicate_content", details: { fileId: TARGET } } });
+	});
+
+	it("a replacement of this file with the same content: answers that it already has it, as a retry would", async () => {
+		const { replaced, other } = await raceWithReplacement((db) => replace(NEW, { env: { DB: db } }));
+		await expectReplacedAndClean();
+		expect(replaced.status).toBe(200);
+		expect(await replaced.json()).toMatchObject({ replaced: true, file: { id: TARGET } });
+		expect(other.status).toBe(200);
+		expect(await other.json()).toMatchObject({ replaced: false, file: { id: TARGET, sha256: await sha256Hex(NEW) } });
+	});
+});
+
+describe("taking over a pending row and switching to it", () => {
+	// The replacement's switch and another request's claim (FR-008) need the same pending row, so only one can win.
+	const newKey = `files/${TARGET}/pend000001`;
+	const pendingRow = { id: "pend000001", r2_key: newKey, updated_at: NOW };
+
+	beforeEach(async () => {
+		await seedFile({ id: "pend000001", status: "pending", body: NEW, r2Key: newKey, updatedAt: NOW });
+	});
+
+	async function switchTo(at: number, maxPendingAgeMs = 10 * MINUTE): Promise<boolean> {
+		return switchContent(env.DB, {
+			targetId: TARGET,
+			expectedSha256: await sha256Hex(ORIGINAL),
+			pendingId: "pend000001",
+			r2Key: newKey,
+			name: "しおり-v2.png",
+			contentType: "image/png",
+			size: bytes(NEW),
+			sha256: await sha256Hex(NEW),
+			now: at,
+			maxPendingAgeMs,
+		});
+	}
+
+	it("a claim after the switch fails, and the row that holds the old content stays", async () => {
+		expect(await switchTo(NOW + 10 * MINUTE - 100)).toBe(true);
+		const switched = await storage();
+		expect(await claimStalePending(env.DB, pendingRow, NOW + 10 * MINUTE + 100)).toBe(false);
+		expect(await storage()).toEqual(switched);
+		expect(switched.rows).toEqual([
+			{ id: "pend000001", status: "deleting", r2_key: `files/${TARGET}`, size: bytes(ORIGINAL) },
+			{ id: TARGET, status: "ready", r2_key: newKey, size: bytes(NEW) },
+		]);
+	});
+
+	it("a switch after the claim fails, even without the 10-minute limit, and the file keeps its content", async () => {
+		expect(await claimStalePending(env.DB, pendingRow, NOW + 10 * MINUTE + 100)).toBe(true);
+		expect(await switchTo(NOW + 10 * MINUTE - 100, Number.MAX_SAFE_INTEGER)).toBe(false);
+		const after = await storage();
+		expect(after.rows).toEqual([
+			{ id: "pend000001", status: "deleting", r2_key: newKey, size: bytes(NEW) },
+			{ id: TARGET, status: "ready", r2_key: `files/${TARGET}`, size: bytes(ORIGINAL) },
+		]);
+		expect((await delivered(ACTIVE))?.body).toBe(ORIGINAL);
+		// A second claim of the same row fails too.
+		expect(await claimStalePending(env.DB, pendingRow, NOW + 10 * MINUTE + 200)).toBe(false);
+	});
+
+	it("claims only the row as it was read", async () => {
+		for (const changed of [{ r2_key: `files/${TARGET}/pend000002` }, { updated_at: NOW + 1 }, { id: "pend000002" }]) {
+			expect(await claimStalePending(env.DB, { ...pendingRow, ...changed }, NOW + 11 * MINUTE)).toBe(false);
+		}
+		expect((await storage()).rows).toContainEqual({ id: "pend000001", status: "pending", r2_key: newKey, size: bytes(NEW) });
 	});
 });
 

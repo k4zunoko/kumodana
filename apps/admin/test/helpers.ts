@@ -135,6 +135,44 @@ export async function seedFile(file: SeedFile): Promise<void> {
 	if (file.withObject !== false) await env.BUCKET.put(r2Key, body);
 }
 
+/** A promise resolved from outside, to put concurrent requests in a given order. */
+export function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve = () => {};
+	const promise = new Promise<void>((r) => {
+		resolve = r;
+	});
+	return { promise, resolve };
+}
+
+/**
+ * A D1 binding whose first lookup of a live file by SHA-256 (`findLiveBySha256`) reads D1 at once, but whose result
+ * arrives only after `delay`, like a slow response. `lookups` has what each lookup read.
+ */
+export function lateFirstLookup(delay: () => Promise<void>): { db: unknown; lookups: unknown[] } {
+	const lookups: unknown[] = [];
+	const db = {
+		prepare: (query: string) => {
+			const statement = env.DB.prepare(query);
+			if (!query.startsWith("SELECT * FROM files WHERE sha256 = ?")) return statement;
+			return {
+				bind: (...values: unknown[]) => {
+					const bound = statement.bind(...values);
+					return {
+						first: async () => {
+							const row = await bound.first();
+							lookups.push(row);
+							if (lookups.length === 1) await delay();
+							return row;
+						},
+					};
+				},
+			};
+		},
+		batch: (statements: D1PreparedStatement[]) => env.DB.batch(statements),
+	};
+	return { db, lookups };
+}
+
 export async function sha256Hex(data: string | ArrayBuffer | Uint8Array): Promise<string> {
 	const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
