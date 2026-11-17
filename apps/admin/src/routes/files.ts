@@ -12,8 +12,9 @@ import type { Context, Hono, HonoRequest } from "hono";
 import type { AppEnv } from "../app.ts";
 import {
 	beginDeletion,
+	claimStalePending,
+	deleteDeletingRow,
 	deleteFileRows,
-	deleteReplacedRow,
 	deleteRow,
 	findLiveBySha256,
 	getFileRow,
@@ -99,16 +100,32 @@ function parseIfMatch(value: string | undefined): string {
 	return match[1];
 }
 
-/** A pending row with the same content: 409 while it may still be uploading, otherwise remove it (FR-008). */
-async function clearStalePending(env: Env, now: number, existing: FileRow): Promise<void> {
-	const age = now - existing.updated_at;
-	if (age < PENDING_GRACE_MS) {
-		throw new ApiError(409, "upload_in_progress", undefined, {
-			retryAfterSeconds: Math.ceil((PENDING_GRACE_MS - age) / 1000),
-		});
+/**
+ * The ready file with this content, or null when there is none and the content can be stored (FR-007, FR-008).
+ * A pending upload of the same content answers 409 while it is younger than 10 minutes. An older one is taken over,
+ * but only by claiming its row in D1 first (`claimStalePending`): the row may have changed since it was read (the
+ * upload ended, a replacement switched a file to it, another request took it over), and its key may then be the key
+ * of a ready file. A lost claim removes nothing, and the content is looked up again.
+ */
+async function findLiveContent(env: Env, now: () => number, sha256: string): Promise<FileRow | null> {
+	for (let attempt = 0; attempt < 2; attempt++) {
+		const existing = await findLiveBySha256(env.DB, sha256);
+		if (existing?.status !== "pending") return existing;
+		const at = now();
+		const age = at - existing.updated_at;
+		if (age < PENDING_GRACE_MS) {
+			throw new ApiError(409, "upload_in_progress", undefined, {
+				retryAfterSeconds: Math.ceil((PENDING_GRACE_MS - age) / 1000),
+			});
+		}
+		if (await claimStalePending(env.DB, existing, at)) {
+			await env.BUCKET.delete(existing.r2_key);
+			await deleteDeletingRow(env.DB, existing.id);
+			return null;
+		}
 	}
-	await env.BUCKET.delete(existing.r2_key);
-	await deleteRow(env.DB, existing.id);
+	// Lost the claim again: other requests with the same content are working on it.
+	throw new ApiError(409, "upload_in_progress");
 }
 
 /**
@@ -170,13 +187,12 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 		const deps = c.get("deps");
 		const content = parseContentHeaders(c.req);
 
-		const existing = await findLiveBySha256(c.env.DB, content.sha256);
-		if (existing?.status === "ready") {
+		// An interrupted upload of the same content is taken over after 10 minutes (FR-008).
+		const existing = await findLiveContent(c.env, () => deps.now(), content.sha256);
+		if (existing) {
 			const file = await getFileSummary(c.env.DB, existing.id);
 			return c.json({ file, duplicate: true }, 200);
 		}
-		// An interrupted upload of the same content is replaced after 10 minutes (FR-008).
-		if (existing?.status === "pending") await clearStalePending(c.env, deps.now(), existing);
 
 		const pending = await createPendingRow(c.env, { ...content, now: deps.now() }, (id) => `files/${id}`);
 		await storeObject(c.env, pending, c.req.raw.body, content);
@@ -252,10 +268,10 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 	 * Replacement (specs/005-replace-content): the file keeps its ID, links, and tags, and gets new content, name,
 	 * and type. The new content goes to a new key under a pending row (the limit counts old and new), then one batch
 	 * switches the file to it and leaves the old content as a deleting row. The switch happens only while the file is
-	 * ready with the If-Match SHA-256 and the pending row is younger than 10 minutes (an older one may be taken over,
-	 * FR-008). Then: purge `f:<id>` if the file ever had a link (a failure is reported, the replacement stays), and
-	 * remove the old object and row. If this stops midway, the cron removes what is left. Until the switch, the file
-	 * keeps serving its old content.
+	 * ready with the If-Match SHA-256 and the pending row is still pending (not claimed by another request with the same
+	 * content, which may take it over after 10 minutes, FR-008) and younger than 10 minutes. Then: purge `f:<id>` if the
+	 * file ever had a link (a failure is reported, the replacement stays), and remove the old object and row. If this
+	 * stops midway, the cron removes what is left. Until the switch, the file keeps serving its old content.
 	 */
 	app.put("/api/files/:id/content", async (c) => {
 		const deps = c.get("deps");
@@ -266,18 +282,20 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 
 		// Already this content, for example a retry whose response was lost: change nothing and retry only the purge.
 		// RFC 9110 §13.1.1 allows a success when the requested change is already in place, whatever If-Match says.
-		if (content.sha256 === target.sha256) {
-			const purge = await purgeFile(c, target.id);
-			const file = await getFileSummary(c.env.DB, target.id);
+		const unchanged = async (current: FileRow) => {
+			const purge = await purgeFile(c, current.id);
+			const file = await getFileSummary(c.env.DB, current.id);
 			if (!file) throw new ApiError(404, "not_found");
-			return c.json({ file, replaced: false, previous: contentOf(target), purge });
-		}
+			return c.json({ file, replaced: false, previous: contentOf(current), purge });
+		};
+		if (content.sha256 === target.sha256) return unchanged(target);
 		if (expectedSha256 !== target.sha256) throw new ApiError(412, "precondition_failed");
 
 		// Same content is stored once (FR-007), so content that another file has cannot become this file's.
-		const existing = await findLiveBySha256(c.env.DB, content.sha256);
-		if (existing?.status === "ready") throw new ApiError(409, "duplicate_content", undefined, { fileId: existing.id });
-		if (existing?.status === "pending") await clearStalePending(c.env, deps.now(), existing);
+		const existing = await findLiveContent(c.env, () => deps.now(), content.sha256);
+		// The file itself has it only if another replacement switched it to this content after it was read above.
+		if (existing?.id === target.id) return unchanged(existing);
+		if (existing) throw new ApiError(409, "duplicate_content", undefined, { fileId: existing.id });
 
 		// A new key every time: going back to an earlier content must not meet its old object waiting for cleanup.
 		const pending = await createPendingRow(c.env, { ...content, now: deps.now() }, (id) => `files/${target.id}/${id}`);
@@ -319,7 +337,7 @@ export function filesRoutes(app: Hono<AppEnv>): void {
 		if (old) {
 			try {
 				await c.env.BUCKET.delete(old.r2_key);
-				await deleteReplacedRow(c.env.DB, old.id);
+				await deleteDeletingRow(c.env.DB, old.id);
 			} catch (error) {
 				console.error(`removing the old content of ${target.id} failed; the cron removes it`, error);
 			}

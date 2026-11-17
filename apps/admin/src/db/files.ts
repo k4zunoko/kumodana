@@ -45,6 +45,29 @@ export async function deleteRow(db: D1Database, id: string): Promise<void> {
 	await db.prepare("DELETE FROM files WHERE id = ?").bind(id).run();
 }
 
+/**
+ * Takes over a pending upload left for over 10 minutes (FR-008) by making it `deleting`, only while it is still the
+ * row that was read: the same ID, still `pending`, with the same key and update time. Only a request that claimed the
+ * row may remove its R2 object, and then the row (`deleteDeletingRow`). One statement, so it cannot both succeed and
+ * lose the row to what else may change it: the upload ending (`markReady`), a replacement switching a file to it
+ * (`switchContent`), or another claim. Each needs the row still `pending`, so only the first of them changes it.
+ * Returns whether the row was claimed.
+ */
+export async function claimStalePending(
+	db: D1Database,
+	row: Pick<FileRow, "id" | "r2_key" | "updated_at">,
+	now: number,
+): Promise<boolean> {
+	const result = await db
+		.prepare(
+			`UPDATE files SET status = 'deleting', updated_at = ?4
+			 WHERE id = ?1 AND status = 'pending' AND r2_key = ?2 AND updated_at = ?3`,
+		)
+		.bind(row.id, row.r2_key, row.updated_at, now)
+		.run();
+	return result.meta.changes > 0;
+}
+
 /** The live (pending or ready) file with this content, if any. */
 export async function findLiveBySha256(db: D1Database, sha256: string): Promise<FileRow | null> {
 	return db.prepare("SELECT * FROM files WHERE sha256 = ? AND status != 'deleting'").bind(sha256).first<FileRow>();
@@ -149,8 +172,10 @@ export type ContentSwitch = {
 	sha256: string;
 	now: number;
 	/**
-	 * The pending row must be younger than this (updated after `now - maxPendingAgeMs`). An older one may already be
-	 * taken over by another upload of the same content or by the cleanup, which remove its object (FR-008).
+	 * The pending row must be younger than this (updated after `now - maxPendingAgeMs`). An older one is regarded as
+	 * abandoned (FR-008), and the replacement gives up and keeps the old content. Another request with the same content
+	 * takes it over only through `claimStalePending`, which the switch excludes by itself (both need the row `pending`).
+	 * This limit still keeps the switch well before the cron, which removes pending rows after 30 minutes without a claim.
 	 */
 	maxPendingAgeMs: number;
 };
@@ -163,7 +188,8 @@ const MOVING = "moving:";
  * becomes a `deleting` row that holds the old content (key, name, type, size, SHA-256), and the file takes the new key
  * and metadata. Both keys always have a row, so R2 objects are never left without one, and the file's key always has
  * an object (constitution III). Nothing changes unless the file is still `ready` with `expectedSha256` and the
- * pending row is still there and young enough. Returns whether the file was switched.
+ * pending row is still `pending` (not claimed by `claimStalePending`) and young enough. Returns whether the file was
+ * switched.
  */
 export async function switchContent(db: D1Database, change: ContentSwitch): Promise<boolean> {
 	const results = await db.batch([
@@ -221,7 +247,10 @@ export async function switchContent(db: D1Database, change: ContentSwitch): Prom
 	return (results[1]?.meta.changes ?? 0) > 0;
 }
 
-/** Removes the row left by a replacement (the old content). Call only after its R2 object is gone. */
-export async function deleteReplacedRow(db: D1Database, id: string): Promise<void> {
+/**
+ * Removes a `deleting` row: the old content left by a replacement, or a pending upload claimed by `claimStalePending`.
+ * Call only after its R2 object is gone.
+ */
+export async function deleteDeletingRow(db: D1Database, id: string): Promise<void> {
 	await db.prepare("DELETE FROM files WHERE id = ? AND status = 'deleting'").bind(id).run();
 }
